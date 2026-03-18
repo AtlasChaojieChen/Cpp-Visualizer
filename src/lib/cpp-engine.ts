@@ -789,6 +789,12 @@ class Interpreter {
       else if (stmt.varType === 'string') value = '';
       else if (stmt.varType === 'bool') value = false;
       else if (stmt.varType === 'char') value = '\0';
+      else if (!stmt.isPointer && this.structs.has(stmt.varType)) {
+        const sd = this.structs.get(stmt.varType)!;
+        const obj: Record<string, any> = {};
+        for (const m of sd.members) obj[m.name] = m.isPointer ? 0 : 0;
+        value = obj;
+      }
       this.declareVar(stmt.name, stmt.varType + (stmt.isPointer ? '*' : ''), value, stmt.isPointer);
     }
     this.recordStep(stmt.line);
@@ -836,25 +842,55 @@ class Interpreter {
     this.recordStep(stmt.line);
   }
 
+  private resolveCinTargetType(target: ASTNode): string {
+    if (target.type === 'Identifier') {
+      const v = this.lookupVar(target.name);
+      if (!v) throw new Error(`Undefined variable '${target.name}'`);
+      return v.type;
+    }
+    if (target.type === 'ArrayAccess') {
+      const v = this.lookupVar(target.array.name);
+      if (!v) throw new Error(`Undefined array '${target.array.name}'`);
+      return v.type; // element type — arrays store element type (e.g. 'int')
+    }
+    if (target.type === 'MemberAccess') {
+      const obj = this.lookupVar(target.object.name);
+      if (!obj) throw new Error(`Undefined variable '${target.object.name}'`);
+      const sd = this.structs.get(obj.type);
+      if (sd) {
+        const m = sd.members.find((mem: any) => mem.name === target.member);
+        if (m) return m.isPointer ? m.type.replace('*', '') : m.type;
+      }
+      return 'int';
+    }
+    if (target.type === 'Deref') {
+      if (target.operand.type === 'Identifier') {
+        const v = this.lookupVar(target.operand.name);
+        if (v && v.type.endsWith('*')) return v.type.slice(0, -1);
+      }
+      return 'int';
+    }
+    return 'int';
+  }
+
   private executeCin(stmt: ASTNode): void {
     for (const target of stmt.targets) {
       if (this.stdinPos >= this.stdinBuffer.length) {
         throw new Error(`Not enough input provided for cin at line ${stmt.line}`);
       }
       const raw = this.stdinBuffer[this.stdinPos++];
-      const v = this.lookupVar(target.name);
-      if (!v) throw new Error(`Undefined variable '${target.name}' at line ${stmt.line}`);
+      const varType = this.resolveCinTargetType(target);
       let parsed: any;
-      if (v.type === 'int') parsed = parseInt(raw, 10);
-      else if (v.type === 'float' || v.type === 'double') parsed = parseFloat(raw);
-      else if (v.type === 'char') parsed = raw[0] || '\0';
-      else if (v.type === 'string') parsed = raw;
-      else if (v.type === 'bool') parsed = raw !== '0' && raw.toLowerCase() !== 'false';
+      if (varType === 'int') parsed = parseInt(raw, 10);
+      else if (varType === 'float' || varType === 'double') parsed = parseFloat(raw);
+      else if (varType === 'char') parsed = raw[0] || '\0';
+      else if (varType === 'string') parsed = raw;
+      else if (varType === 'bool') parsed = raw !== '0' && raw.toLowerCase() !== 'false';
       else parsed = isNaN(Number(raw)) ? raw : Number(raw);
       if (typeof parsed === 'number' && isNaN(parsed)) {
-        throw new Error(`Invalid input '${raw}' for type '${v.type}' at line ${stmt.line}`);
+        throw new Error(`Invalid input '${raw}' for type '${varType}' at line ${stmt.line}`);
       }
-      this.setVar(target.name, parsed);
+      this.assignTo(target, parsed);
     }
     this.recordStep(stmt.line);
   }
