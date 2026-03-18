@@ -10,6 +10,14 @@ const formatFrameLabel = (frame: StackFrameInfo) => {
   return `${frame.name}(${args})`;
 };
 
+const formatValue = (value: any): string => {
+  if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    const fields = Object.entries(value).map(([k, v]) => `${k}: ${v}`).join(', ');
+    return `{ ${fields} }`;
+  }
+  return typeof value === 'string' ? `"${value}"` : String(value);
+};
+
 export const VariableInspector = ({ callStack }: Props) => {
   const framesWithVars = callStack
     .map((frame, i) => ({
@@ -54,7 +62,7 @@ export const VariableInspector = ({ callStack }: Props) => {
                 </div>
                 <div className="p-2 text-muted-foreground text-xs">{v.type}</div>
                 <motion.div
-                  key={String(v.value)}
+                  key={JSON.stringify(v.value)}
                   initial={v.changed ? { backgroundColor: 'hsla(45, 97%, 56%, 0.25)' } : {}}
                   animate={{ backgroundColor: 'hsla(45, 97%, 56%, 0)' }}
                   transition={{ duration: 0.8 }}
@@ -63,7 +71,7 @@ export const VariableInspector = ({ callStack }: Props) => {
                   {v.isPointer ? (
                     <span className="text-viz-orange">→ 0x{Number(v.value).toString(16)}</span>
                   ) : (
-                    typeof v.value === 'string' ? `"${v.value}"` : String(v.value)
+                    formatValue(v.value)
                   )}
                 </motion.div>
               </motion.div>

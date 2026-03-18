@@ -13,6 +13,14 @@ const formatFrameLabel = (frame: StackFrameInfo) => {
   return `${frame.name}(${args})`;
 };
 
+const formatValue = (value: any): string => {
+  if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    const fields = Object.entries(value).map(([k, v]) => `${k}: ${v}`).join(', ');
+    return `{ ${fields} }`;
+  }
+  return String(value);
+};
+
 export const CallStackView = ({ callStack, sourceLines, selectedFrameIndex, onSelectFrame, nextLine }: Props) => {
   if (callStack.length === 0) return null;
 
@@ -53,7 +61,7 @@ export const CallStackView = ({ callStack, sourceLines, selectedFrameIndex, onSe
                         <span className="text-muted-foreground/60">{v.name}</span>
                         <span className="text-viz-yellow">=</span>
                         <span className={v.changed ? 'text-viz-yellow' : 'text-foreground/80'}>
-                          {String(v.value)}
+                          {formatValue(v.value)}
                         </span>
                       </span>
                     ))}
