@@ -1,8 +1,9 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import type { StackFrameInfo } from '@/lib/cpp-engine';
+import type { StackFrameInfo, VariableInfo } from '@/lib/cpp-engine';
 
 interface Props {
   callStack: StackFrameInfo[];
+  globals?: VariableInfo[];
 }
 
 const formatFrameLabel = (frame: StackFrameInfo) => {
@@ -18,7 +19,7 @@ const formatValue = (value: any): string => {
   return typeof value === 'string' ? `"${value}"` : String(value);
 };
 
-export const VariableInspector = ({ callStack }: Props) => {
+export const VariableInspector = ({ callStack, globals }: Props) => {
   const framesWithVars = callStack
     .map((frame, i) => ({
       frame,
@@ -27,7 +28,9 @@ export const VariableInspector = ({ callStack }: Props) => {
     }))
     .filter(f => f.vars.length > 0);
 
-  if (framesWithVars.length === 0) return null;
+  const globalScalars = globals?.filter(v => !v.isArray) ?? [];
+
+  if (framesWithVars.length === 0 && globalScalars.length === 0) return null;
 
   return (
     <div className="space-y-2">
@@ -77,6 +80,38 @@ export const VariableInspector = ({ callStack }: Props) => {
               </motion.div>
             ))
           )}
+          {globalScalars.map((v) => (
+            <motion.div
+              key={`global-${v.name}-${v.address}`}
+              layout
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0, scale: 0.95 }}
+              transition={{ duration: 0.2 }}
+              className="grid grid-cols-4 text-sm font-mono border-t border-border"
+            >
+              <div className="p-2 text-viz-purple text-xs truncate">
+                GLOBAL
+              </div>
+              <div className={`p-2 ${v.isPointer ? 'text-viz-orange' : 'text-viz-blue'}`}>
+                {v.isPointer && '* '}{v.name}
+              </div>
+              <div className="p-2 text-muted-foreground text-xs">{v.type}</div>
+              <motion.div
+                key={JSON.stringify(v.value)}
+                initial={v.changed ? { backgroundColor: 'hsla(45, 97%, 56%, 0.25)' } : {}}
+                animate={{ backgroundColor: 'hsla(45, 97%, 56%, 0)' }}
+                transition={{ duration: 0.8 }}
+                className="p-2 font-semibold"
+              >
+                {v.isPointer ? (
+                  <span className="text-viz-orange">→ 0x{Number(v.value).toString(16)}</span>
+                ) : (
+                  formatValue(v.value)
+                )}
+              </motion.div>
+            </motion.div>
+          ))}
         </AnimatePresence>
       </div>
     </div>

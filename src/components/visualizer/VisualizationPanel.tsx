@@ -86,7 +86,7 @@ export const VisualizationPanel = ({ currentStep, prevStep, sourceLines }: Props
       <ResizablePanel defaultSize={60} minSize={15}>
         <ScrollArea className="h-full">
           <div className="p-4 space-y-4">
-            <VariableInspector callStack={selectedCallStack} />
+            <VariableInspector callStack={selectedCallStack} globals={currentStep.globals} />
             {arrays.length > 0 && (
               <ArrayVisualizer arrays={arrays} prevArrays={prevArrays} arrayAccesses={currentStep.arrayAccesses} />
             )}

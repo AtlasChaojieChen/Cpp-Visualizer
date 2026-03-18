@@ -4,6 +4,7 @@ export interface ExecutionStep {
   line: number;
   nextLine?: number;
   callStack: StackFrameInfo[];
+  globals?: VariableInfo[];
   output: string;
   heap: HeapBlockInfo[];
   arrayAccesses: ArrayAccessInfo[];
@@ -651,6 +652,7 @@ class Interpreter {
   private functions = new Map<string, ASTNode>();
   private structs = new Map<string, { name: string; members: { type: string; name: string; isPointer: boolean }[] }>();
   private callStack: Frame[] = [];
+  private globalVars = new Map<string, VarEntry>();
   private heap = new Map<number, HeapEntry>();
   private nextAddr = 100;
   private output = '';
@@ -667,12 +669,43 @@ class Interpreter {
         if (node.type === 'FunctionDecl') this.functions.set(node.name, node);
         if (node.type === 'StructDecl') this.structs.set(node.name, { name: node.name, members: node.members });
       }
+      // Initialize global variables before main() runs
+      for (const node of program.body) {
+        if (node.type === 'VarDecl') this.initGlobalVar(node);
+        if (node.type === 'MultiVarDecl') for (const decl of node.declarations) this.initGlobalVar(decl);
+      }
       if (!this.functions.has('main')) throw new Error('No main() function found');
       this.callFunction('main', []);
       return { steps: this.steps };
     } catch (e: any) {
       if (e instanceof ReturnSignal) return { steps: this.steps };
       return { steps: this.steps, error: e.message };
+    }
+  }
+
+  private initGlobalVar(stmt: ASTNode): void {
+    if (stmt.isArray) {
+      let values: any[];
+      if (stmt.arrayInit) {
+        values = stmt.arrayInit.map((e: ASTNode) => { try { return this.evalExpr(e); } catch { return 0; } });
+      } else {
+        const sz = stmt.arraySize ? (() => { try { return this.evalExpr(stmt.arraySize); } catch { return 0; } })() : 0;
+        values = new Array(sz).fill(0);
+      }
+      this.globalVars.set(stmt.name, { type: stmt.varType, value: values, address: this.allocAddr(), isPointer: false, isArray: true });
+    } else {
+      let value: any = 0;
+      if (stmt.init) { try { value = this.evalExpr(stmt.init); } catch { value = 0; } }
+      else if (stmt.varType === 'string') value = '';
+      else if (stmt.varType === 'bool') value = false;
+      else if (stmt.varType === 'char') value = '\0';
+      else if (!stmt.isPointer && this.structs.has(stmt.varType)) {
+        const sd = this.structs.get(stmt.varType)!;
+        const obj: Record<string, any> = {};
+        for (const m of sd.members) obj[m.name] = 0;
+        value = obj;
+      }
+      this.globalVars.set(stmt.name, { type: stmt.varType + (stmt.isPointer ? '*' : ''), value, address: this.allocAddr(), isPointer: stmt.isPointer || false, isArray: false });
     }
   }
 
@@ -696,7 +729,7 @@ class Interpreter {
       const v = this.callStack[i].vars.get(name);
       if (v) return v;
     }
-    return undefined;
+    return this.globalVars.get(name);
   }
 
   private setVar(name: string, value: any): void {
@@ -705,6 +738,10 @@ class Interpreter {
         this.callStack[i].vars.get(name)!.value = value;
         return;
       }
+    }
+    if (this.globalVars.has(name)) {
+      this.globalVars.get(name)!.value = value;
+      return;
     }
     throw new Error(`Undefined variable '${name}'`);
   }
@@ -1137,6 +1174,19 @@ class Interpreter {
     throw new Error('Cannot assign to this expression');
   }
 
+  private snapVarEntry(name: string, v: VarEntry): VariableInfo {
+    return {
+      name,
+      type: v.type,
+      value: Array.isArray(v.value) ? [...v.value] : (typeof v.value === 'object' && v.value !== null ? { ...v.value } : v.value),
+      address: v.address,
+      isPointer: v.isPointer,
+      isArray: v.isArray,
+      changed: false,
+      ...(v.isPointer ? { pointsTo: v.value as number } : {}),
+    };
+  }
+
   private recordStep(line: number): void {
     this.currentFrame().activeLine = line;
     const step: ExecutionStep = {
@@ -1149,17 +1199,9 @@ class Interpreter {
         endLine: frame.endLine,
         activeLine: frame.activeLine,
         activeCallColumns: frame.activeCallColumns ? { ...frame.activeCallColumns } : null,
-        variables: Array.from(frame.vars.entries()).map(([name, v]) => ({
-          name,
-          type: v.type,
-          value: Array.isArray(v.value) ? [...v.value] : (typeof v.value === 'object' && v.value !== null ? { ...v.value } : v.value),
-          address: v.address,
-          isPointer: v.isPointer,
-          isArray: v.isArray,
-          changed: false,
-          ...(v.isPointer ? { pointsTo: v.value as number } : {}),
-        })),
+        variables: Array.from(frame.vars.entries()).map(([name, v]) => this.snapVarEntry(name, v)),
       })),
+      globals: Array.from(this.globalVars.entries()).map(([name, v]) => this.snapVarEntry(name, v)),
       output: this.output,
       heap: Array.from(this.heap.entries()).map(([addr, h]) => ({
         address: addr, type: h.type,
@@ -1179,6 +1221,10 @@ class Interpreter {
             v.changed = pv ? JSON.stringify(v.value) !== JSON.stringify(pv.value) : true;
           } else v.changed = true;
         }
+      }
+      for (const gv of step.globals!) {
+        const pgv = prev.globals?.find(p => p.name === gv.name);
+        gv.changed = pgv ? JSON.stringify(gv.value) !== JSON.stringify(pgv.value) : true;
       }
     }
 

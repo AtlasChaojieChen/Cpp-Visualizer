@@ -9,6 +9,7 @@ import { VisualizationPanel } from '@/components/visualizer/VisualizationPanel';
 
 import { executeCode, type ExecutionStep } from '@/lib/cpp-engine';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import { HelpModal } from '@/components/visualizer/HelpModal';
 
 
 const Index = () => {
@@ -75,6 +76,7 @@ int main() {
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted-foreground">Step-by-step execution visualizer</span>
+          <HelpModal />
           <ThemeToggle />
         </div>
       </header>
