@@ -13,16 +13,15 @@ const SUPPORTED = [
   'Step-by-step execution with line highlighting',
   'Call stack visualization',
   'Variable inspection (scalars, pointers, structs)',
-  'Global variables (scalar)',
+  'Global variables and global arrays',
   'Recursion',
-  '1D arrays',
+  '1D arrays (local and global)',
   'Pointers and heap memory (new / delete)',
   'Struct field input and display',
   'cin input for plain variables, array elements, struct fields, and dereferenced pointers',
 ];
 
 const LIMITATIONS = [
-  'Global arrays not yet supported',
   '2D arrays not yet supported',
   'Brace initialization (Node a{1, nullptr};) not yet supported',
   'Advanced C++ / STL features (maps, sets, templates, …) are out of scope',
@@ -35,11 +34,18 @@ const TIPS = [
   'If execution fails, the syntax may be unsupported rather than a bug in your code',
 ];
 
+const SEEN_KEY = 'cpp-viz-help-seen';
+
 export const HelpModal = () => {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(() => localStorage.getItem(SEEN_KEY) !== '1');
+
+  const handleOpenChange = (next: boolean) => {
+    if (!next) localStorage.setItem(SEEN_KEY, '1');
+    setOpen(next);
+  };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
         <Button
           size="icon"

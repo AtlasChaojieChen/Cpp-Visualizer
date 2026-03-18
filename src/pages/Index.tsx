@@ -67,16 +67,19 @@ int main() {
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-background">
       {/* Header */}
-      <header className="h-11 border-b border-border flex items-center justify-between px-4 bg-card shrink-0">
+      <header className="h-11 border-b border-border flex items-center justify-between px-4 bg-card shrink-0 relative">
         <div className="flex items-center gap-2.5">
           <img src={logo} alt="C++ Visualizer" className="w-7 h-7 rounded-md" />
           <h1 className="text-sm font-bold tracking-tight">
             C++ <span className="text-primary">Visualizer</span>
           </h1>
         </div>
+        {/* Center: reopen help modal */}
+        <div className="absolute left-1/2 -translate-x-1/2">
+          <HelpModal />
+        </div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted-foreground">Step-by-step execution visualizer</span>
-          <HelpModal />
           <ThemeToggle />
         </div>
       </header>
