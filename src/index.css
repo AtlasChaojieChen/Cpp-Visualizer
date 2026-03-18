@@ -1,0 +1,151 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Light mode — neutral warm grays */
+    --background: 0 0% 96%;
+    --foreground: 0 0% 15%;
+    --card: 0 0% 93%;
+    --card-foreground: 0 0% 15%;
+    --popover: 0 0% 93%;
+    --popover-foreground: 0 0% 15%;
+    --primary: 160 84% 39%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 0 0% 88%;
+    --secondary-foreground: 0 0% 15%;
+    --muted: 0 0% 90%;
+    --muted-foreground: 0 0% 47%;
+    --accent: 0 0% 85%;
+    --accent-foreground: 0 0% 15%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 82%;
+    --input: 0 0% 82%;
+    --ring: 160 84% 39%;
+    --radius: 0.625rem;
+
+    --viz-blue: 217 92% 68%;
+    --viz-orange: 27 96% 61%;
+    --viz-green: 160 84% 39%;
+    --viz-purple: 250 70% 60%;
+    --viz-yellow: 45 97% 56%;
+    --viz-red: 0 75% 55%;
+
+    --sidebar-background: 0 0% 94%;
+    --sidebar-foreground: 0 0% 15%;
+    --sidebar-primary: 160 84% 39%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 0 0% 88%;
+    --sidebar-accent-foreground: 0 0% 15%;
+    --sidebar-border: 0 0% 82%;
+    --sidebar-ring: 160 84% 39%;
+  }
+
+  .dark {
+    /* #141414 = 0 0% 8% */
+    --background: 0 0% 8%;
+    /* #1c1c1c = 0 0% 11% */
+    --foreground: 0 0% 89%;
+    /* #1c1c1c */
+    --card: 0 0% 11%;
+    --card-foreground: 0 0% 89%;
+    /* #1c1c1c */
+    --popover: 0 0% 11%;
+    --popover-foreground: 0 0% 89%;
+    /* #10b981 */
+    --primary: 160 84% 39%;
+    --primary-foreground: 0 0% 8%;
+    /* #111111 = 0 0% 7% — deeper inset */
+    --secondary: 0 0% 7%;
+    --secondary-foreground: 0 0% 89%;
+    /* #1c1c1c */
+    --muted: 0 0% 11%;
+    /* #787878 = 0 0% 47% */
+    --muted-foreground: 0 0% 47%;
+    /* #111111 */
+    --accent: 0 0% 7%;
+    --accent-foreground: 0 0% 89%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    /* #2a2a2a = 0 0% 16.5% */
+    --border: 0 0% 16.5%;
+    --input: 0 0% 16.5%;
+    --ring: 160 84% 39%;
+    --radius: 0.625rem;
+
+    /* #60a5fa */
+    --viz-blue: 217 92% 68%;
+    /* #fb923c */
+    --viz-orange: 27 96% 61%;
+    /* #10b981 */
+    --viz-green: 160 84% 39%;
+    --viz-purple: 250 80% 70%;
+    --viz-yellow: 45 97% 56%;
+    --viz-red: 0 85% 65%;
+
+    /* Sidebar */
+    --sidebar-background: 0 0% 7%;
+    --sidebar-foreground: 0 0% 89%;
+    --sidebar-primary: 160 84% 39%;
+    --sidebar-primary-foreground: 0 0% 8%;
+    --sidebar-accent: 0 0% 11%;
+    --sidebar-accent-foreground: 0 0% 89%;
+    --sidebar-border: 0 0% 16.5%;
+    --sidebar-ring: 160 84% 39%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+}
+
+/* Monaco editor current line highlight */
+.current-line-highlight {
+  background: hsla(160, 84%, 39%, 0.12) !important;
+  border-left: 3px solid hsl(160, 84%, 39%) !important;
+}
+
+.current-line-glyph {
+  background: hsl(160, 84%, 39%);
+  width: 3px !important;
+  margin-left: 3px;
+}
+
+/* Monaco editor next line highlight */
+.next-line-highlight {
+  background: hsla(217, 92%, 68%, 0.08) !important;
+  border-left: 3px solid hsla(217, 92%, 68%, 0.5) !important;
+}
+
+.next-line-glyph {
+  background: hsla(217, 92%, 68%, 0.5);
+  width: 3px !important;
+  margin-left: 3px;
+}
+
+/* Monaco editor parent call line highlight */
+.parent-call-line-highlight {
+  background: hsla(27, 96%, 61%, 0.08) !important;
+  border-left: 3px solid hsla(27, 96%, 61%, 0.5) !important;
+}
+
+.parent-call-line-glyph {
+  background: hsla(27, 96%, 61%, 0.5);
+  width: 3px !important;
+  margin-left: 3px;
+}
+
+/* Inline highlight for the specific call expression */
+.parent-call-inline-highlight {
+  background: hsla(27, 96%, 61%, 0.25) !important;
+  border-bottom: 2px solid hsl(27, 96%, 61%) !important;
+  border-radius: 2px;
+}
