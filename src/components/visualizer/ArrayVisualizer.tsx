@@ -19,15 +19,25 @@ export const ArrayVisualizer = ({ arrays, prevArrays, arrayAccesses = [], global
       </h3>
       {arrays.map((arr) => {
         const prevArr = prevArrays?.find(a => a.name === arr.name);
-        const values = arr.value as number[];
+        const values = arr.value as any[];
         const accesses = arrayAccesses.filter(a => a.arrayName === arr.name);
+
+        // Trim trailing default-value (zero/empty) elements for display.
+        // Always keep any index that is currently accessed or has a non-default value.
+        const maxAccessedIdx = accesses.length > 0 ? Math.max(...accesses.map(a => a.index)) : -1;
+        let trimEnd = values.length - 1;
+        while (trimEnd > 0 && (values[trimEnd] === 0 || values[trimEnd] === '') && trimEnd > maxAccessedIdx) {
+          trimEnd--;
+        }
+        const visibleValues = values.slice(0, trimEnd + 1);
+
         return (
           <div key={arr.name} className="space-y-1.5">
             <div className="text-xs font-mono text-muted-foreground">
               {arr.type.replace('[]', '').replace(/vector<(\w+)>/, '$1')} <span className="text-viz-blue">{arr.name}</span>[{values.length}]{globalArrayNames?.has(arr.name) && <span className="text-viz-purple ml-1.5">(global)</span>}
             </div>
             <div className="flex gap-1 flex-wrap">
-              {values.map((val, idx) => {
+              {visibleValues.map((val, idx) => {
                 const prevVal = prevArr ? (prevArr.value as number[])[idx] : undefined;
                 const changed = prevVal !== undefined && prevVal !== val;
                 const access = accesses.find(a => a.index === idx);
