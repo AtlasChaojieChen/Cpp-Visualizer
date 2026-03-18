@@ -5,9 +5,10 @@ interface Props {
   arrays: VariableInfo[];
   prevArrays?: VariableInfo[];
   arrayAccesses?: ArrayAccessInfo[];
+  globalArrayNames?: Set<string>;
 }
 
-export const ArrayVisualizer = ({ arrays, prevArrays, arrayAccesses = [] }: Props) => {
+export const ArrayVisualizer = ({ arrays, prevArrays, arrayAccesses = [], globalArrayNames }: Props) => {
   if (arrays.length === 0) return null;
 
   return (
@@ -23,7 +24,7 @@ export const ArrayVisualizer = ({ arrays, prevArrays, arrayAccesses = [] }: Prop
         return (
           <div key={arr.name} className="space-y-1.5">
             <div className="text-xs font-mono text-muted-foreground">
-              {arr.type.replace('[]', '').replace(/vector<(\w+)>/, '$1')} <span className="text-viz-blue">{arr.name}</span>[{values.length}]
+              {arr.type.replace('[]', '').replace(/vector<(\w+)>/, '$1')} <span className="text-viz-blue">{arr.name}</span>[{values.length}]{globalArrayNames?.has(arr.name) && <span className="text-viz-purple ml-1.5">(global)</span>}
             </div>
             <div className="flex gap-1 flex-wrap">
               {values.map((val, idx) => {

@@ -43,11 +43,15 @@ export const VisualizationPanel = ({ currentStep, prevStep, sourceLines }: Props
   const selectedFrame = selectedFrameIndex !== null ? currentStep.callStack[selectedFrameIndex] : null;
   const selectedCallStack = selectedFrame ? [selectedFrame] : currentStep.callStack;
   const allVars = selectedCallStack.flatMap(f => f.variables);
-  const arrays = allVars.filter(v => v.isArray);
+  const globalArrays = (currentStep.globals ?? []).filter(v => v.isArray);
+  const arrays = [...allVars.filter(v => v.isArray), ...globalArrays];
+  const globalArrayNames = new Set(globalArrays.map(v => v.name));
 
   const prevSelectedFrame = selectedFrameIndex !== null && prevStep ? prevStep.callStack[selectedFrameIndex] : null;
   const prevCallStack = prevSelectedFrame ? [prevSelectedFrame] : prevStep?.callStack;
-  const prevArrays = prevCallStack?.flatMap(f => f.variables).filter(v => v.isArray);
+  const prevLocalArrays = prevCallStack?.flatMap(f => f.variables).filter(v => v.isArray) ?? [];
+  const prevGlobalArrays = (prevStep?.globals ?? []).filter(v => v.isArray);
+  const prevArrays = [...prevLocalArrays, ...prevGlobalArrays];
 
   // Collect pointer variables for tree visualization
   const pointerVars = allVars
@@ -88,7 +92,7 @@ export const VisualizationPanel = ({ currentStep, prevStep, sourceLines }: Props
           <div className="p-4 space-y-4">
             <VariableInspector callStack={selectedCallStack} globals={currentStep.globals} />
             {arrays.length > 0 && (
-              <ArrayVisualizer arrays={arrays} prevArrays={prevArrays} arrayAccesses={currentStep.arrayAccesses} />
+              <ArrayVisualizer arrays={arrays} prevArrays={prevArrays} arrayAccesses={currentStep.arrayAccesses} globalArrayNames={globalArrayNames} />
             )}
             {hasTreeNodes && (
               <TreeVisualizer heap={currentStep.heap} pointerVars={pointerVars} />
