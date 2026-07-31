@@ -1,15 +1,11 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import type { StackFrameInfo, VariableInfo } from '@/lib/cpp-engine';
+import { formatFrameLabel } from '@/lib/format';
 
 interface Props {
   callStack: StackFrameInfo[];
   globals?: VariableInfo[];
 }
-
-const formatFrameLabel = (frame: StackFrameInfo) => {
-  const args = frame.args?.map(a => String(a)).join(', ') ?? '';
-  return `${frame.name}(${args})`;
-};
 
 const formatValue = (value: any): string => {
   if (value !== null && typeof value === 'object' && !Array.isArray(value)) {

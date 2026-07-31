@@ -1,4 +1,5 @@
 import type { StackFrameInfo } from '@/lib/cpp-engine';
+import { formatFrameLabel } from '@/lib/format';
 
 interface Props {
   callStack: StackFrameInfo[];
@@ -7,11 +8,6 @@ interface Props {
   onSelectFrame: (index: number) => void;
   nextLine?: number;
 }
-
-const formatFrameLabel = (frame: StackFrameInfo) => {
-  const args = frame.args?.map(a => String(a)).join(', ') ?? '';
-  return `${frame.name}(${args})`;
-};
 
 const formatValue = (value: any): string => {
   if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
