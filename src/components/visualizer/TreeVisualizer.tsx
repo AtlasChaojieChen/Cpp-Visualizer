@@ -85,7 +85,7 @@ function renderNode(node: LayoutNode, offsetX: number, nodeSize: number, levelHe
     const lcy = node.left.y * levelHeight + nodeSize / 2 + 8;
     edges.push(
       <line key={`e-${node.address}-l`} x1={cx} y1={cy + 16} x2={lcx} y2={lcy - 16}
-        stroke="hsl(250, 93%, 76%)" strokeWidth="2" strokeOpacity="0.4" />
+        className="stroke-viz-purple" strokeWidth="2" strokeOpacity="0.4" />
     );
     renderNode(node.left, offsetX, nodeSize, levelHeight, nodes, edges);
   }
@@ -94,15 +94,15 @@ function renderNode(node: LayoutNode, offsetX: number, nodeSize: number, levelHe
     const rcy = node.right.y * levelHeight + nodeSize / 2 + 8;
     edges.push(
       <line key={`e-${node.address}-r`} x1={cx} y1={cy + 16} x2={rcx} y2={rcy - 16}
-        stroke="hsl(250, 93%, 76%)" strokeWidth="2" strokeOpacity="0.4" />
+        className="stroke-viz-purple" strokeWidth="2" strokeOpacity="0.4" />
     );
     renderNode(node.right, offsetX, nodeSize, levelHeight, nodes, edges);
   }
 
   nodes.push(
     <g key={`n-${node.address}`}>
-      <circle cx={cx} cy={cy} r={18} fill="hsla(250, 93%, 76%, 0.15)" stroke="hsl(250, 93%, 76%)" strokeWidth="2" />
-      <text x={cx} y={cy + 5} textAnchor="middle" fill="hsl(226, 64%, 88%)" fontSize="13" fontFamily="monospace" fontWeight="600">
+      <circle cx={cx} cy={cy} r={18} className="fill-viz-purple/[0.15] stroke-viz-purple" strokeWidth="2" />
+      <text x={cx} y={cy + 5} textAnchor="middle" className="fill-foreground" fontSize="13" fontFamily="monospace" fontWeight="600">
         {String(node.value)}
       </text>
     </g>
