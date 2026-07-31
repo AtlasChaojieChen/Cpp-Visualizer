@@ -21,49 +21,9 @@ if (!existsSync(join(here, 'engine.mjs'))) {
 
 const { executeCode } = await import('./engine.mjs');
 const { Programs } = await import('./programs.js');
-
-// Trailing whitespace per line and trailing newlines are not graded.
-function Normalize(s) {
-  return String(s ?? '')
-    .replace(/\r/g, '')
-    .split('\n')
-    .map((l) => l.replace(/\s+$/, ''))
-    .join('\n')
-    .replace(/\n+$/, '');
-}
-
-// Heuristic: does an error message look like a leaked JS runtime error
-// rather than a message the engine threw on purpose?
-const JS_ERROR_RE = /maximum call stack|cannot read propert|is not a function|is not defined|undefined is not|null is not/i;
-
-function Classify(p, res) {
-  const out = res.steps.length ? Normalize(res.steps[res.steps.length - 1].output) : '';
-  const err = res.error ?? null;
-  const jsLeak = err !== null && JS_ERROR_RE.test(err);
-  const e = p.expect;
-
-  if (e.output !== undefined) {
-    if (err === null && out === Normalize(e.output)) return { status: 'PASS', out, err };
-    if (err !== null) return { status: jsLeak ? 'JS-ERROR' : 'CLEAN-ERROR', out, err };
-    return { status: 'WRONG', out, err };
-  }
-  if (e.errorPattern) {
-    if (err !== null && e.errorPattern.test(err)) return { status: 'PASS', out, err };
-    if (err !== null) return { status: jsLeak ? 'JS-ERROR' : 'CLEAN-ERROR', out, err };
-    return { status: 'WRONG', out, err };
-  }
-  if (e.cleanError) {
-    if (err !== null && !jsLeak) return { status: 'PASS', out, err };
-    if (err !== null) return { status: 'JS-ERROR', out, err };
-    return { status: 'WRONG', out, err }; // ran silently as if the feature were supported
-  }
-  if (e.either) {
-    if (err !== null && !jsLeak) return { status: 'PASS', out, err };
-    if (err !== null) return { status: 'JS-ERROR', out, err };
-    return { status: 'PASS-GARBAGE', out, err }; // garbage output is informative too
-  }
-  throw new Error(`Program ${p.id} has no expectation`);
-}
+// Grading logic lives in classify.mjs so this harness and the vitest guard in
+// src/test/ladder.test.ts can never disagree about what "passing" means.
+const { Classify } = await import('./classify.mjs');
 
 const results = [];
 for (const p of Programs) {
