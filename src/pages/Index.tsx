@@ -10,6 +10,8 @@ import { VisualizationPanel } from '@/components/visualizer/VisualizationPanel';
 import { executeCode, type ExecutionStep } from '@/lib/cpp-engine';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { HelpModal } from '@/components/visualizer/HelpModal';
+import { ExamplePicker } from '@/components/visualizer/ExamplePicker';
+import type { ExampleProgram } from '@/lib/example-programs';
 
 
 const Index = () => {
@@ -37,6 +39,7 @@ int main() {
   const [error, setError] = useState<string | null>(null);
   const [stdin, setStdin] = useState('');
   const [stdinOpen, setStdinOpen] = useState(false);
+  const [exampleName, setExampleName] = useState<string | null>(null);
 
   const currentStep = stepIndex >= 0 && stepIndex < steps.length ? steps[stepIndex] : null;
   const prevStep = stepIndex > 0 ? steps[stepIndex - 1] : null;
@@ -52,6 +55,16 @@ int main() {
   const stepForward = () => setStepIndex(prev => Math.min(prev + 1, steps.length - 1));
   const stepBack = () => setStepIndex(prev => Math.max(prev - 1, 0));
   const reset = () => { setSteps([]); setStepIndex(-1); setIsPlaying(false); setError(null); };
+
+  // Monaco suppresses its onChange for programmatic value updates, so the
+  // editor's reset() does not fire here — clear execution state explicitly.
+  // stdin is always overwritten so a previous example's input cannot leak in.
+  const loadExample = (example: ExampleProgram) => {
+    setCode(example.code);
+    setStdin(example.stdin ?? '');
+    setExampleName(example.name);
+    reset();
+  };
 
   useEffect(() => {
     if (!isPlaying) return;
@@ -73,13 +86,15 @@ int main() {
           <h1 className="text-sm font-bold tracking-tight">
             C++ <span className="text-primary">Visualizer</span>
           </h1>
+          <div className="w-px h-5 bg-border mx-1" />
+          <ExamplePicker value={exampleName} onSelect={loadExample} />
         </div>
         {/* Center: reopen help modal */}
         <div className="absolute left-1/2 -translate-x-1/2">
           <HelpModal />
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">Step-by-step execution visualizer</span>
+          <span className="hidden lg:inline text-xs text-muted-foreground">Step-by-step execution visualizer</span>
           <ThemeToggle />
         </div>
       </header>
@@ -96,7 +111,7 @@ int main() {
                   <div className="flex-1 min-h-0">
                     <CodeEditor
                       code={code}
-                      onChange={(c) => { setCode(c); reset(); }}
+                      onChange={(c) => { setCode(c); setExampleName(null); reset(); }}
                       currentLine={currentStep?.line ?? 0}
                       nextLine={currentStep?.nextLine}
                       error={error}

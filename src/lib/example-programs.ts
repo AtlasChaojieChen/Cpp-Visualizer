@@ -1,4 +1,11 @@
-export const EXAMPLES = [
+export type ExampleProgram = {
+  name: string;
+  code: string;
+  /** Pre-filled STDIN for programs that read with `cin`. */
+  stdin?: string;
+};
+
+export const EXAMPLES: ExampleProgram[] = [
   {
     name: 'Variables & Arithmetic',
     code: `#include <iostream>
