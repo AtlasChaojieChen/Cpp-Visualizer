@@ -620,6 +620,9 @@ class Parser {
 
 // ===================== INTERPRETER =====================
 
+// Assigning a char into one of these yields its ASCII code, per C++ promotion.
+const NUMERIC_TYPES = new Set(['int', 'short', 'long', 'float', 'double']);
+
 class ReturnSignal { constructor(public value: any) {} }
 class BreakSignal {}
 class ContinueSignal {}
@@ -672,6 +675,12 @@ class Interpreter {
   private output = '';
   private steps: ExecutionStep[] = [];
   private maxSteps = 10000;
+  // Guards runaway recursion. `maxSteps` already stops most of it, but a
+  // function that recurses without recording a step (or that blows the real JS
+  // stack first) used to leak "Maximum call stack size exceeded" and produce a
+  // nondeterministic step count. 200 frames is far above anything the visualizer
+  // can usefully display — the deepest program in the corpus reaches 16.
+  private maxCallDepth = 200;
   private stdinBuffer: string[] = [];
   private stdinPos = 0;
   private currentArrayAccesses: ArrayAccessInfo[] = [];
@@ -702,11 +711,13 @@ class Interpreter {
       let values: any[];
       if (stmt.arrayInit) {
         values = stmt.arrayInit.map((e: ASTNode) => { try { return this.evalExpr(e); } catch { return 0; } });
+        values = this.padToDeclaredSize(values, stmt);
       } else {
         const sz = stmt.arraySize ? (() => { try { return this.evalExpr(stmt.arraySize); } catch { return 0; } })() : 0;
         values = new Array(sz).fill(0);
       }
-      this.globalVars.set(stmt.name, { type: stmt.varType, value: values, address: this.allocAddr(), isPointer: false, isArray: true });
+      const et = this.ElementType(stmt.varType);
+      this.globalVars.set(stmt.name, { type: stmt.varType, value: values.map(v => this.CoerceToDeclared(et, v)), address: this.allocAddr(), isPointer: false, isArray: true });
     } else {
       let value: any = 0;
       if (stmt.init) { try { value = this.evalExpr(stmt.init); } catch { value = 0; } }
@@ -719,11 +730,23 @@ class Interpreter {
         for (const m of sd.members) obj[m.name] = 0;
         value = obj;
       }
-      this.globalVars.set(stmt.name, { type: stmt.varType + (stmt.isPointer ? '*' : ''), value, address: this.allocAddr(), isPointer: stmt.isPointer || false, isArray: false });
+      const gType = stmt.varType + (stmt.isPointer ? '*' : '');
+      this.globalVars.set(stmt.name, { type: gType, value: stmt.isPointer ? value : this.CoerceToDeclared(gType, value), address: this.allocAddr(), isPointer: stmt.isPointer || false, isArray: false });
     }
   }
 
   private allocAddr(): number { const a = this.nextAddr; this.nextAddr += 4; return a; }
+
+  // A brace initialiser may be shorter than the declared size; C++ value-
+  // initialises the remainder. Vectors have no declared size to honour.
+  private padToDeclaredSize(values: any[], stmt: ASTNode): any[] {
+    if (stmt.isVector || !stmt.arraySize) return values;
+    let size: number;
+    try { size = this.evalExpr(stmt.arraySize); } catch { return values; }
+    if (typeof size !== 'number' || size <= values.length) return values;
+    const fill = stmt.varType === 'string' ? '' : stmt.varType === 'char' ? '\0' : stmt.varType === 'bool' ? false : 0;
+    return values.concat(new Array(size - values.length).fill(fill));
+  }
 
   private getLastLine(node: ASTNode): number {
     let max = node.line;
@@ -746,6 +769,107 @@ class Interpreter {
     return this.globalVars.get(name);
   }
 
+  // ---- char handling -------------------------------------------------------
+  //
+  // A char is still stored as a one-character JS string, exactly as before, so
+  // the snapshot format, `cout`, `cin` and equality are all untouched. Two
+  // narrow additions make `c + 1` mean 98 without inventing a type system:
+  //
+  //   1. `IsCharExpr` reads the DECLARED type of an expression. It is a lookup,
+  //      not an inferencer: it answers only for literals, casts, variables,
+  //      array elements, struct members and calls — i.e. places where a type was
+  //      written down and is already stored (VarEntry.type, param.type, struct
+  //      member type, FunctionDecl.returnType). Everything else returns null and
+  //      falls back to today's runtime behaviour.
+  //   2. `CoerceToDeclared` converts at declaration/assignment boundaries, which
+  //      is exactly what C++ does: `c + 1` is an int, and `char d = <int>` narrows
+  //      it back to a character.
+  //
+  // Crucially this does NOT thread static types through evalExpr — evalExpr's
+  // inputs and return values are unchanged — so it leaves the `/`-truncation
+  // design question untouched. It also never guesses that a one-character string
+  // is a char: `string s = "a"; s + "b"` sees a declared `string` and concatenates.
+  private BaseType(type: string): string {
+    let t = type;
+    if (t.startsWith('const ')) t = t.slice(6);
+    if (t.endsWith('&')) t = t.slice(0, -1);
+    return t;
+  }
+
+  private ElementType(varType: string): string {
+    const m = /^vector<(.+)>$/.exec(this.BaseType(varType));
+    return m ? m[1] : varType;
+  }
+
+  private MemberTypeOf(objExpr: ASTNode, member: string): string | null {
+    if (objExpr.type !== 'Identifier') return null;
+    const v = this.lookupVar(objExpr.name);
+    if (!v) return null;
+    const sd = this.structs.get(this.BaseType(v.type).replace(/\*+$/, ''));
+    return sd?.members.find(m => m.name === member)?.type ?? null;
+  }
+
+  // The declared type of an expression, or null when it was never written down.
+  private DeclaredTypeOf(expr: ASTNode): string | null {
+    switch (expr.type) {
+      case 'CharLit': return 'char';
+      case 'StringLit': return 'string';
+      case 'Cast': return expr.castType;
+      case 'Identifier': {
+        const v = this.lookupVar(expr.name);
+        return v ? this.BaseType(v.type) : null;
+      }
+      case 'ArrayAccess': {
+        if (expr.array.type !== 'Identifier') return null;
+        const v = this.lookupVar(expr.array.name);
+        return v && v.isArray ? this.ElementType(v.type) : null;
+      }
+      case 'MemberAccess': return this.MemberTypeOf(expr.object, expr.member);
+      case 'ArrowAccess': return this.MemberTypeOf(expr.object, expr.member);
+      case 'Call':
+        return expr.callee.type === 'Identifier'
+          ? this.functions.get(expr.callee.name)?.returnType ?? null
+          : null;
+      default: return null;
+    }
+  }
+
+  private IsCharExpr(expr: ASTNode): boolean {
+    return this.DeclaredTypeOf(expr) === 'char'; // exact: 'char*' is a pointer, not a char
+  }
+
+  // `+`/`-` are char arithmetic when a declared char is involved and no operand
+  // is a std::string — `s + c` is concatenation in C++, `c - '0'` is arithmetic.
+  private IsCharArith(le: ASTNode, l: any, re: ASTNode, r: any): boolean {
+    const lc = this.IsCharExpr(le), rc = this.IsCharExpr(re);
+    if (!lc && !rc) return false;
+    if (!lc && typeof l === 'string') return false;
+    if (!rc && typeof r === 'string') return false;
+    return true;
+  }
+
+  private CharCode(v: any): number {
+    return typeof v === 'string' ? v.charCodeAt(0) : v;
+  }
+
+  // `c++` / `--c` on a char steps the ASCII code and stays a char, so
+  // `for (char c = 'a'; c <= 'z'; c++)` walks the alphabet instead of
+  // building the string "a1".
+  private StepValue(operand: ASTNode, cur: any, delta: number): any {
+    return typeof cur === 'string' && this.IsCharExpr(operand)
+      ? String.fromCharCode(cur.charCodeAt(0) + delta)
+      : cur + delta;
+  }
+
+  private CoerceToDeclared(type: string, value: any): any {
+    const base = this.BaseType(type);
+    if (base === 'char' && typeof value === 'number')
+      return String.fromCharCode(((Math.trunc(value) % 256) + 256) % 256);
+    if (typeof value === 'string' && value.length === 1 && NUMERIC_TYPES.has(base))
+      return value.charCodeAt(0);
+    return value;
+  }
+
   // Every read/write of a variable's storage goes through this pair, so a
   // reference parameter transparently resolves to the slot it aliases.
   private readEntry(v: VarEntry): any {
@@ -753,8 +877,9 @@ class Interpreter {
   }
 
   private writeEntry(v: VarEntry, value: any): void {
-    if (v.ref) v.ref.obj[v.ref.key] = value;
-    else v.value = value;
+    const nv = v.isArray || v.isPointer ? value : this.CoerceToDeclared(v.type, value);
+    if (v.ref) v.ref.obj[v.ref.key] = nv;
+    else v.value = nv;
   }
 
   private setVar(name: string, value: any): void {
@@ -802,8 +927,27 @@ class Interpreter {
     throw new Error(`Cannot bind reference parameter '${paramName}' to a non-lvalue at line ${argExpr.line}`);
   }
 
+  // Every indexed read and write funnels through here. Real C++ would read or
+  // scribble on adjacent memory; this interpreter has no adjacent memory to
+  // model, so the honest teaching answer is to name the index and the bounds.
+  // Silently returning JS `undefined` (reads) or growing the JS array (writes)
+  // both taught a false model of what a fixed-size array is.
+  private checkIndex(arr: any[], idx: any, expr: ASTNode): number {
+    const label = expr.type === 'ArrayAccess' && expr.array.type === 'Identifier' ? `'${expr.array.name}'` : 'array';
+    if (typeof idx !== 'number' || !Number.isInteger(idx))
+      throw new Error(`Array index must be an integer, got '${idx}' at line ${expr.line}`);
+    if (idx < 0 || idx >= arr.length)
+      throw new Error(
+        `Array index out of bounds: ${label}[${idx}] — valid indices are ` +
+        (arr.length === 0 ? 'none (size 0)' : `0..${arr.length - 1}`) +
+        ` at line ${expr.line}`,
+      );
+    return idx;
+  }
+
   private declareVar(name: string, type: string, value: any, isPointer = false, isArray = false): void {
-    this.currentFrame().vars.set(name, { type, value, address: this.allocAddr(), isPointer, isArray });
+    const v = isArray || isPointer ? value : this.CoerceToDeclared(type, value);
+    this.currentFrame().vars.set(name, { type, value: v, address: this.allocAddr(), isPointer, isArray });
   }
 
   // `args` always holds plain evaluated values — it is what renders the call
@@ -811,14 +955,19 @@ class Interpreter {
   private callFunction(name: string, args: any[], refs: (RefBinding | null)[] = []): any {
     const func = this.functions.get(name);
     if (!func) throw new Error(`Undefined function '${name}'`);
+    if (this.callStack.length >= this.maxCallDepth)
+      throw new Error(`Call depth limit exceeded (possible infinite recursion) in '${name}'`);
     const endLine = this.getLastLine(func.body);
     const frame: Frame = { name, args: [...args], vars: new Map(), startLine: func.line, endLine, activeLine: func.line, activeCallColumns: null };
     for (let i = 0; i < func.params.length; i++) {
       const param = func.params[i];
       const ref = refs[i] || null;
+      const passed = i < args.length ? args[i] : 0;
       frame.vars.set(param.name, {
         type: param.type + (param.isPointer ? '*' : '') + (param.isRef ? '&' : ''),
-        value: ref ? undefined : (i < args.length ? args[i] : 0),
+        // Passing by value converts to the parameter's declared type; a `&`
+        // param must already alias a slot of the right type, so it is untouched.
+        value: ref ? undefined : (param.isPointer ? passed : this.CoerceToDeclared(param.type, passed)),
         address: ref ? ref.address : this.allocAddr(),
         isPointer: param.isPointer,
         isArray: false,
@@ -830,7 +979,9 @@ class Interpreter {
     try {
       this.executeBlock(func.body);
     } catch (e) {
-      if (e instanceof ReturnSignal) { this.callStack.pop(); return e.value; }
+      // `char f() { return c + 1; }` narrows back to a char at the return, same
+      // as any other declared-type boundary.
+      if (e instanceof ReturnSignal) { this.callStack.pop(); return this.CoerceToDeclared(func.returnType, e.value); }
       throw e;
     }
     this.callStack.pop();
@@ -876,10 +1027,15 @@ class Interpreter {
         values = new Array(size).fill(fill);
       } else if (stmt.arrayInit) {
         values = stmt.arrayInit.map((e: ASTNode) => this.evalExpr(e));
+        // `int a[10] = {0};` declares ten elements, not one. The declared size
+        // wins; C++ zero-fills the tail. Without this the new bounds check
+        // would reject the standard zero-init idiom.
+        values = this.padToDeclaredSize(values, stmt);
       } else {
         values = new Array(stmt.arraySize ? this.evalExpr(stmt.arraySize) : 0).fill(0);
       }
-      this.declareVar(stmt.name, stmt.varType, values, false, true);
+      const et = this.ElementType(stmt.varType);
+      this.declareVar(stmt.name, stmt.varType, values.map(v => this.CoerceToDeclared(et, v)), false, true);
     } else {
       let value: any = 0;
       if (stmt.init) value = this.evalExpr(stmt.init);
@@ -1014,10 +1170,38 @@ class Interpreter {
         return this.readEntry(v);
       }
       case 'Binary': {
+        // C++ short-circuits && and ||: the right operand is not evaluated when
+        // the left already decides the result. Evaluating both eagerly broke the
+        // standard guard idiom `j >= 0 && a[j] > key`, which relies on the guard
+        // to keep the index in range. `l ? r : l` / `l ? l : r` reproduce the
+        // previous return values exactly — only the evaluation becomes lazy.
+        if (expr.operator === '&&') { const l = this.evalExpr(expr.left); return l ? this.evalExpr(expr.right) : l; }
+        if (expr.operator === '||') { const l = this.evalExpr(expr.left); return l ? l : this.evalExpr(expr.right); }
         const l = this.evalExpr(expr.left), r = this.evalExpr(expr.right);
+        // Comparing a declared char against a number compares its ASCII code;
+        // char-vs-char stays a string compare, which is already correct for ASCII.
+        if (['<', '>', '<=', '>=', '==', '!='].includes(expr.operator)) {
+          const cl = this.IsCharExpr(expr.left) && typeof r === 'number';
+          const cr = this.IsCharExpr(expr.right) && typeof l === 'number';
+          if (cl || cr) {
+            const a = this.CharCode(l), b = this.CharCode(r);
+            switch (expr.operator) {
+              case '<': return a < b;
+              case '>': return a > b;
+              case '<=': return a <= b;
+              case '>=': return a >= b;
+              case '==': return a === b;
+              case '!=': return a !== b;
+            }
+          }
+        }
         switch (expr.operator) {
-          case '+': return (typeof l === 'string' || typeof r === 'string') ? String(l) + String(r) : l + r;
-          case '-': return l - r;
+          case '+':
+            if (this.IsCharArith(expr.left, l, expr.right, r)) return this.CharCode(l) + this.CharCode(r);
+            return (typeof l === 'string' || typeof r === 'string') ? String(l) + String(r) : l + r;
+          case '-':
+            if (this.IsCharArith(expr.left, l, expr.right, r)) return this.CharCode(l) - this.CharCode(r);
+            return l - r;
           case '*': return l * r;
           case '/': return Number.isInteger(l) && Number.isInteger(r) ? Math.trunc(l / r) : l / r;
           case '%': return l % r;
@@ -1045,20 +1229,24 @@ class Interpreter {
         const cur = this.evalLValue(expr.target), r = this.evalExpr(expr.value);
         let nv: any;
         switch (expr.operator) {
-          case '+=': nv = cur + r; break;
-          case '-=': nv = cur - r; break;
+          case '+=': nv = this.IsCharArith(expr.target, cur, expr.value, r) ? this.CharCode(cur) + this.CharCode(r) : cur + r; break;
+          case '-=': nv = this.IsCharArith(expr.target, cur, expr.value, r) ? this.CharCode(cur) - this.CharCode(r) : cur - r; break;
           case '*=': nv = cur * r; break;
           case '/=': nv = Math.trunc(cur / r); break;
           case '%=': nv = cur % r; break;
           default: throw new Error(`Unknown operator '${expr.operator}'`);
         }
+        // The compound result lands in the target, so it narrows to the target's
+        // declared type — `char c; c += 1;` stores and yields 'b', not 98.
+        const tt = this.DeclaredTypeOf(expr.target);
+        if (tt) nv = this.CoerceToDeclared(tt, nv);
         this.assignTo(expr.target, nv);
         return nv;
       }
-      case 'PostfixInc': { const v = this.evalLValue(expr.operand); this.assignTo(expr.operand, v + 1); return v; }
-      case 'PostfixDec': { const v = this.evalLValue(expr.operand); this.assignTo(expr.operand, v - 1); return v; }
-      case 'PrefixInc': { const v = this.evalLValue(expr.operand) + 1; this.assignTo(expr.operand, v); return v; }
-      case 'PrefixDec': { const v = this.evalLValue(expr.operand) - 1; this.assignTo(expr.operand, v); return v; }
+      case 'PostfixInc': { const v = this.evalLValue(expr.operand); this.assignTo(expr.operand, this.StepValue(expr.operand, v, 1)); return v; }
+      case 'PostfixDec': { const v = this.evalLValue(expr.operand); this.assignTo(expr.operand, this.StepValue(expr.operand, v, -1)); return v; }
+      case 'PrefixInc': { const v = this.StepValue(expr.operand, this.evalLValue(expr.operand), 1); this.assignTo(expr.operand, v); return v; }
+      case 'PrefixDec': { const v = this.StepValue(expr.operand, this.evalLValue(expr.operand), -1); this.assignTo(expr.operand, v); return v; }
       case 'ArrayAccess': {
         const arr = this.evalExpr(expr.array), idx = this.evalExpr(expr.index);
         // Track array access for visualization
@@ -1067,7 +1255,7 @@ class Interpreter {
           const label = expr.index.type === 'Identifier' ? expr.index.name : String(idx);
           this.currentArrayAccesses.push({ arrayName: expr.array.name, index: idx, label });
         }
-        if (Array.isArray(arr)) return arr[idx];
+        if (Array.isArray(arr)) return arr[this.checkIndex(arr, idx, expr)];
         throw new Error('Not an array');
       }
       case 'Call': {
@@ -1209,7 +1397,8 @@ class Interpreter {
     }
     if (expr.type === 'ArrayAccess') {
       const arr = this.evalExpr(expr.array), idx = this.evalExpr(expr.index);
-      return arr[idx];
+      if (!Array.isArray(arr)) throw new Error('Not an array');
+      return arr[this.checkIndex(arr, idx, expr)];
     }
     if (expr.type === 'Deref') return this.evalExpr(expr);
     if (expr.type === 'ArrowAccess') return this.evalExpr(expr);
@@ -1222,7 +1411,9 @@ class Interpreter {
     if (target.type === 'ArrayAccess') {
       const v = this.lookupVar(target.array.name);
       if (!v) throw new Error(`Undefined array '${target.array.name}'`);
-      this.readEntry(v)[this.evalExpr(target.index)] = value;
+      const arr = this.readEntry(v);
+      if (!Array.isArray(arr)) throw new Error(`'${target.array.name}' is not an array at line ${target.line}`);
+      arr[this.checkIndex(arr, this.evalExpr(target.index), target)] = this.CoerceToDeclared(this.ElementType(v.type), value);
       return;
     }
     if (target.type === 'ArrowAccess') {
@@ -1231,7 +1422,8 @@ class Interpreter {
       const heapEntry = this.heap.get(addr);
       if (!heapEntry) throw new Error(`Invalid pointer at address ${addr}`);
       if (typeof heapEntry.value === 'object' && heapEntry.value !== null) {
-        heapEntry.value[target.member] = value;
+        const mt = this.MemberTypeOf(target.object, target.member);
+        heapEntry.value[target.member] = mt ? this.CoerceToDeclared(mt, value) : value;
         return;
       }
       throw new Error(`Cannot assign to member '${target.member}'`);
@@ -1240,14 +1432,19 @@ class Interpreter {
       const entry = this.lookupVar(target.object.name);
       const obj = entry ? this.readEntry(entry) : null;
       if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
-        obj[target.member] = value;
+        const mt = this.MemberTypeOf(target.object, target.member);
+        obj[target.member] = mt ? this.CoerceToDeclared(mt, value) : value;
         return;
       }
       throw new Error(`Cannot assign to member '${target.member}'`);
     }
     if (target.type === 'Deref') {
       const addr = this.evalExpr(target.operand);
-      if (this.heap.has(addr)) { this.heap.get(addr)!.value = value; return; }
+      if (this.heap.has(addr)) {
+        const h = this.heap.get(addr)!;
+        h.value = typeof h.value === 'object' && h.value !== null ? value : this.CoerceToDeclared(h.type, value);
+        return;
+      }
       for (const frame of this.callStack)
         for (const [, v] of frame.vars)
           if (v.address === addr) { this.writeEntry(v, value); return; }

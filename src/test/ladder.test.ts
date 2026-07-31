@@ -24,8 +24,9 @@ import { Classify, RANK } from '../../tests/classify.mjs';
 
 type Status = 'PASS' | 'PASS-GARBAGE' | 'CLEAN-ERROR' | 'JS-ERROR' | 'WRONG';
 
-// Verified 2026-07-31 on main @ f6938eb4: 29 PASS, 1 PASS-GARBAGE,
-// 3 CLEAN-ERROR, 1 JS-ERROR, 4 WRONG.
+// Verified 2026-07-31 after Stage 4 (call-depth cap, array bounds, char
+// arithmetic): 33 PASS, 3 CLEAN-ERROR, 2 WRONG.
+// Previously 30 PASS, 1 PASS-GARBAGE, 3 CLEAN-ERROR, 1 JS-ERROR, 3 WRONG.
 const BASELINE: Record<string, Status> = {
   A1: 'WRONG',        // `/` truncates doubles — Stage 5 (design first)
   A2: 'PASS',
@@ -44,7 +45,7 @@ const BASELINE: Record<string, Status> = {
   B7: 'PASS',
   B8: 'PASS',
   B9: 'CLEAN-ERROR',  // string indexing / .length() unsupported — out of scope
-  B10: 'WRONG',       // char arithmetic concatenates — Stage 4
+  B10: 'PASS',        // char arithmetic promotes to ASCII — Stage 4 (was WRONG)
   B11: 'WRONG',       // no 32-bit wraparound — folded into Stage 5
   B12: 'PASS',
   B13: 'CLEAN-ERROR', // 2D arrays unsupported — out of scope
@@ -62,12 +63,12 @@ const BASELINE: Record<string, Status> = {
   D3: 'PASS',
   D4: 'PASS',
   D5: 'PASS',
-  D6: 'JS-ERROR',     // raw "Maximum call stack size exceeded" — Stage 4
-  D7: 'PASS-GARBAGE', // OOB read yields the string "undefined" — Stage 4
+  D6: 'PASS',         // call-depth cap, clean + deterministic — Stage 4 (was JS-ERROR)
+  D7: 'PASS',         // OOB read is a clean bounds error — Stage 4 (was PASS-GARBAGE)
   D8: 'PASS',
 };
 
-const BASELINE_PASS_COUNT = 30;
+const BASELINE_PASS_COUNT = 33;
 
 interface Program {
   id: string;
