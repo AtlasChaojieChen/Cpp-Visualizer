@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# Generated bundle for the standalone test harness
+tests/engine.mjs
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
