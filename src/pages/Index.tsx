@@ -33,7 +33,7 @@ int main() {
   const [steps, setSteps] = useState<ExecutionStep[]>([]);
   const [stepIndex, setStepIndex] = useState(-1);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [speed] = useState(500);
+  const [speed, setSpeed] = useState(500);
   const [error, setError] = useState<string | null>(null);
   const [stdin, setStdin] = useState('');
   const [stdinOpen, setStdinOpen] = useState(false);
@@ -131,6 +131,8 @@ int main() {
                     currentStep={stepIndex}
                     totalSteps={steps.length}
                     onStepChange={(s) => { setStepIndex(s); setIsPlaying(false); }}
+                    speed={speed}
+                    onSpeedChange={setSpeed}
                   />
                 </div>
               </ResizablePanel>
