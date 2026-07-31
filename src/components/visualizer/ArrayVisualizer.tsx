@@ -1,6 +1,9 @@
 import { motion } from 'framer-motion';
 import type { VariableInfo, ArrayAccessInfo } from '@/lib/cpp-engine';
 
+// React silently drops boolean children, so bools must be rendered as text.
+const formatCell = (val: any) => (typeof val === 'boolean' ? String(val) : val);
+
 interface Props {
   arrays: VariableInfo[];
   prevArrays?: VariableInfo[];
@@ -60,7 +63,7 @@ export const ArrayVisualizer = ({ arrays, prevArrays, arrayAccesses = [], global
                           : 'bg-[hsla(217,91%,68%,0.08)] border-[hsla(217,91%,68%,0.25)]'
                       }`}
                     >
-                      {val}
+                      {formatCell(val)}
                     </div>
                     {isAccessed ? (
                       <span className="text-[10px] text-viz-orange font-bold mt-0.5 font-mono">{access.label}</span>
