@@ -38,7 +38,7 @@ const BASELINE: Record<string, Status> = {
   B1: 'PASS',
   B2: 'PASS',
   B3: 'CLEAN-ERROR',  // `int a[]` params unsupported — out of scope
-  B4: 'WRONG',        // reference params ignored — Stage 3
+  B4: 'PASS',         // reference params honoured — Stage 3 (was WRONG)
   B5: 'PASS',
   B6: 'PASS',
   B7: 'PASS',
@@ -67,7 +67,7 @@ const BASELINE: Record<string, Status> = {
   D8: 'PASS',
 };
 
-const BASELINE_PASS_COUNT = 29;
+const BASELINE_PASS_COUNT = 30;
 
 interface Program {
   id: string;

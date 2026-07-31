@@ -624,12 +624,26 @@ class ReturnSignal { constructor(public value: any) {} }
 class BreakSignal {}
 class ContinueSignal {}
 
+// A reference parameter does not own a value; it aliases a storage slot that
+// lives in the caller. `obj[key]` IS that slot: for a plain variable it is the
+// caller's VarEntry with key 'value'; for an array element it is the live
+// array with a numeric index; for a struct field it is the struct object with
+// the field name. All three are mutated in place, so a write through the
+// reference is visible to the caller, and every snapshot reads through to the
+// current value without changing the record-everything-up-front model.
+interface RefBinding {
+  obj: any;
+  key: string | number;
+  address: number;
+}
+
 interface VarEntry {
   type: string;
   value: any;
   address: number;
   isPointer: boolean;
   isArray: boolean;
+  ref?: RefBinding;
 }
 
 interface Frame {
@@ -732,37 +746,83 @@ class Interpreter {
     return this.globalVars.get(name);
   }
 
+  // Every read/write of a variable's storage goes through this pair, so a
+  // reference parameter transparently resolves to the slot it aliases.
+  private readEntry(v: VarEntry): any {
+    return v.ref ? v.ref.obj[v.ref.key] : v.value;
+  }
+
+  private writeEntry(v: VarEntry, value: any): void {
+    if (v.ref) v.ref.obj[v.ref.key] = value;
+    else v.value = value;
+  }
+
   private setVar(name: string, value: any): void {
     for (let i = this.callStack.length - 1; i >= 0; i--) {
       if (this.callStack[i].vars.has(name)) {
-        this.callStack[i].vars.get(name)!.value = value;
+        this.writeEntry(this.callStack[i].vars.get(name)!, value);
         return;
       }
     }
     if (this.globalVars.has(name)) {
-      this.globalVars.get(name)!.value = value;
+      this.writeEntry(this.globalVars.get(name)!, value);
       return;
     }
     throw new Error(`Undefined variable '${name}'`);
+  }
+
+  // Resolve the storage an `&` parameter should alias. Only lvalues that map
+  // onto an (object, key) pair are bindable; anything else is a C++-level
+  // error rather than a silently useless by-value copy.
+  private bindRef(argExpr: ASTNode, paramName: string): RefBinding {
+    if (argExpr.type === 'Identifier') {
+      const v = this.lookupVar(argExpr.name);
+      if (!v) throw new Error(`Undefined variable '${argExpr.name}' at line ${argExpr.line}`);
+      // Passing a reference param onward forwards the original binding, so a
+      // chain of any depth still aliases the one real slot.
+      return v.ref ? v.ref : { obj: v, key: 'value', address: v.address };
+    }
+    if (argExpr.type === 'ArrayAccess' && argExpr.array.type === 'Identifier') {
+      const v = this.lookupVar(argExpr.array.name);
+      if (!v) throw new Error(`Undefined array '${argExpr.array.name}' at line ${argExpr.line}`);
+      const arr = this.readEntry(v);
+      if (!Array.isArray(arr)) throw new Error(`'${argExpr.array.name}' is not an array at line ${argExpr.line}`);
+      const idx = this.evalExpr(argExpr.index);
+      if (typeof idx !== 'number' || idx < 0 || idx >= arr.length)
+        throw new Error(`Reference parameter '${paramName}' binds out of bounds: '${argExpr.array.name}[${idx}]' at line ${argExpr.line}`);
+      return { obj: arr, key: idx, address: this.allocAddr() };
+    }
+    if (argExpr.type === 'MemberAccess' && argExpr.object.type === 'Identifier') {
+      const v = this.lookupVar(argExpr.object.name);
+      const obj = v ? this.readEntry(v) : null;
+      if (!obj || typeof obj !== 'object' || Array.isArray(obj))
+        throw new Error(`Cannot bind reference parameter '${paramName}' to '${argExpr.object.name}.${argExpr.member}' at line ${argExpr.line}`);
+      return { obj, key: argExpr.member, address: this.allocAddr() };
+    }
+    throw new Error(`Cannot bind reference parameter '${paramName}' to a non-lvalue at line ${argExpr.line}`);
   }
 
   private declareVar(name: string, type: string, value: any, isPointer = false, isArray = false): void {
     this.currentFrame().vars.set(name, { type, value, address: this.allocAddr(), isPointer, isArray });
   }
 
-  private callFunction(name: string, args: any[]): any {
+  // `args` always holds plain evaluated values — it is what renders the call
+  // stack label — while `refs` carries the aliasing for `&` params alongside it.
+  private callFunction(name: string, args: any[], refs: (RefBinding | null)[] = []): any {
     const func = this.functions.get(name);
     if (!func) throw new Error(`Undefined function '${name}'`);
     const endLine = this.getLastLine(func.body);
     const frame: Frame = { name, args: [...args], vars: new Map(), startLine: func.line, endLine, activeLine: func.line, activeCallColumns: null };
     for (let i = 0; i < func.params.length; i++) {
       const param = func.params[i];
+      const ref = refs[i] || null;
       frame.vars.set(param.name, {
-        type: param.type + (param.isPointer ? '*' : ''),
-        value: i < args.length ? args[i] : 0,
-        address: this.allocAddr(),
+        type: param.type + (param.isPointer ? '*' : '') + (param.isRef ? '&' : ''),
+        value: ref ? undefined : (i < args.length ? args[i] : 0),
+        address: ref ? ref.address : this.allocAddr(),
         isPointer: param.isPointer,
         isArray: false,
+        ...(ref ? { ref } : {}),
       });
     }
     this.callStack.push(frame);
@@ -883,7 +943,7 @@ class Interpreter {
     if (target.type === 'Identifier') {
       const v = this.lookupVar(target.name);
       if (!v) throw new Error(`Undefined variable '${target.name}'`);
-      return v.type;
+      return v.type.replace(/&$/, ''); // `cin >> refParam` reads the referent's type
     }
     if (target.type === 'ArrayAccess') {
       const v = this.lookupVar(target.array.name);
@@ -951,7 +1011,7 @@ class Interpreter {
       case 'Identifier': {
         const v = this.lookupVar(expr.name);
         if (!v) throw new Error(`Undefined variable '${expr.name}' at line ${expr.line}`);
-        return v.value;
+        return this.readEntry(v);
       }
       case 'Binary': {
         const l = this.evalExpr(expr.left), r = this.evalExpr(expr.right);
@@ -1013,8 +1073,11 @@ class Interpreter {
       case 'Call': {
         // Handle member function calls (e.g., v.push_back(x), v.size())
         if (expr.callee.type === 'MemberAccess') {
-          const obj = this.lookupVar(expr.callee.object.name);
-          if (!obj) throw new Error(`Undefined variable '${expr.callee.object.name}'`);
+          const entry = this.lookupVar(expr.callee.object.name);
+          if (!entry) throw new Error(`Undefined variable '${expr.callee.object.name}'`);
+          // Read through a possible reference binding; the container itself is
+          // shared, so push_back/clear still mutate the caller's vector.
+          const obj = { value: this.readEntry(entry) };
           const method = expr.callee.member;
           const args = expr.args.map((a: ASTNode) => this.evalExpr(a));
           if (method === 'push_back') {
@@ -1050,22 +1113,40 @@ class Interpreter {
           throw new Error(`Unknown method '${method}'`);
         }
         const name = expr.callee.name;
-        const args = expr.args.map((a: ASTNode) => this.evalExpr(a));
+        // `&` params need the argument's storage, not just its value, so the
+        // callee's param list is consulted before the arguments are evaluated.
+        const params: any[] = this.functions.get(name)?.params ?? [];
+        const args: any[] = [];
+        const refs: (RefBinding | null)[] = [];
+        for (let i = 0; i < expr.args.length; i++) {
+          const param = params[i];
+          if (param && param.isRef) {
+            const binding = this.bindRef(expr.args[i], param.name);
+            refs.push(binding);
+            // Read through the binding instead of re-evaluating the argument,
+            // so `f(a[i++])` does not step the index twice.
+            args.push(binding.obj[binding.key]);
+          } else {
+            refs.push(null);
+            args.push(this.evalExpr(expr.args[i]));
+          }
+        }
         // Update parent frame's activeLine and call columns before entering the function
         if (expr.line) this.currentFrame().activeLine = expr.line;
         if (expr.col && expr.endCol) {
           this.currentFrame().activeCallColumns = { startCol: expr.col, endCol: expr.endCol };
         }
-        const result = this.callFunction(name, args);
+        const result = this.callFunction(name, args, refs);
         // Clear call columns after returning
         this.currentFrame().activeCallColumns = null;
         return result;
       }
       case 'MemberAccess': {
         // obj.member - for struct variables on stack
-        const obj = this.lookupVar(expr.object.name);
-        if (obj && typeof obj.value === 'object' && obj.value !== null && !Array.isArray(obj.value)) {
-          return obj.value[expr.member];
+        const entry = this.lookupVar(expr.object.name);
+        const obj = entry ? this.readEntry(entry) : null;
+        if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+          return obj[expr.member];
         }
         throw new Error(`Cannot access member '${expr.member}' on '${expr.object.name}'`);
       }
@@ -1095,7 +1176,7 @@ class Interpreter {
         }
         for (const frame of this.callStack)
           for (const [, v] of frame.vars)
-            if (v.address === addr) return v.value;
+            if (v.address === addr) return this.readEntry(v);
         throw new Error(`Invalid pointer dereference at address ${addr}`);
       }
       case 'New': {
@@ -1124,7 +1205,7 @@ class Interpreter {
     if (expr.type === 'Identifier') {
       const v = this.lookupVar(expr.name);
       if (!v) throw new Error(`Undefined variable '${expr.name}'`);
-      return v.value;
+      return this.readEntry(v);
     }
     if (expr.type === 'ArrayAccess') {
       const arr = this.evalExpr(expr.array), idx = this.evalExpr(expr.index);
@@ -1141,7 +1222,7 @@ class Interpreter {
     if (target.type === 'ArrayAccess') {
       const v = this.lookupVar(target.array.name);
       if (!v) throw new Error(`Undefined array '${target.array.name}'`);
-      v.value[this.evalExpr(target.index)] = value;
+      this.readEntry(v)[this.evalExpr(target.index)] = value;
       return;
     }
     if (target.type === 'ArrowAccess') {
@@ -1156,9 +1237,10 @@ class Interpreter {
       throw new Error(`Cannot assign to member '${target.member}'`);
     }
     if (target.type === 'MemberAccess') {
-      const obj = this.lookupVar(target.object.name);
-      if (obj && typeof obj.value === 'object' && obj.value !== null && !Array.isArray(obj.value)) {
-        obj.value[target.member] = value;
+      const entry = this.lookupVar(target.object.name);
+      const obj = entry ? this.readEntry(entry) : null;
+      if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+        obj[target.member] = value;
         return;
       }
       throw new Error(`Cannot assign to member '${target.member}'`);
@@ -1168,22 +1250,25 @@ class Interpreter {
       if (this.heap.has(addr)) { this.heap.get(addr)!.value = value; return; }
       for (const frame of this.callStack)
         for (const [, v] of frame.vars)
-          if (v.address === addr) { v.value = value; return; }
+          if (v.address === addr) { this.writeEntry(v, value); return; }
       throw new Error(`Invalid pointer assignment at address ${addr}`);
     }
     throw new Error('Cannot assign to this expression');
   }
 
   private snapVarEntry(name: string, v: VarEntry): VariableInfo {
+    // Read through any reference binding so the snapshot shows the aliased
+    // value, then copy exactly as before — the recording model is unchanged.
+    const val = this.readEntry(v);
     return {
       name,
       type: v.type,
-      value: Array.isArray(v.value) ? [...v.value] : (typeof v.value === 'object' && v.value !== null ? { ...v.value } : v.value),
+      value: Array.isArray(val) ? [...val] : (typeof val === 'object' && val !== null ? { ...val } : val),
       address: v.address,
       isPointer: v.isPointer,
       isArray: v.isArray,
       changed: false,
-      ...(v.isPointer ? { pointsTo: v.value as number } : {}),
+      ...(v.isPointer ? { pointsTo: val as number } : {}),
     };
   }
 
