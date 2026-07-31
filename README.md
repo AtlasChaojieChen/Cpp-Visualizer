@@ -1,73 +1,85 @@
-# Welcome to your Lovable project
+# cpp-visualizer
 
-## Project info
+A browser-based C++ execution visualizer. Paste C++, step through it forwards
+*and backwards*, and watch the call stack, variables, heap, arrays and binary
+trees change.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+**There is no compiler and no backend.** A hand-written interpreter runs the
+code in the browser tab. The site is a static build.
 
-## How can I edit this code?
+## How it works
 
-There are several ways of editing your application.
+`src/lib/cpp-engine.ts` is the entire engine: tokenizer → recursive-descent
+parser → tree-walking interpreter. `executeCode(code, stdin)` is the only
+public entry point.
 
-**Use Lovable**
+The load-bearing design decision: **the interpreter runs the program to
+completion up front**, deep-copying a full snapshot of stack, globals, heap and
+output into `steps[]` at every step. The UI is just an integer index into that
+array. That is why backward stepping is exact and why scrubbing is instant at
+any program size (fib(15) is 5,922 steps, generated in ~160ms).
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+Memory addresses are simulated: allocation starts at 100 and increments by 4.
+`delete` marks a block `freed` rather than removing it, which is how
+use-after-free is detected and shown.
 
-Changes made via Lovable will be committed automatically to this repo.
+## Supported C++ subset
 
-**Use your preferred IDE**
+`int`, `float`, `double`, `char`, `bool`, `void`, `string`, `vector`, `struct`
+(data only), `if`/`else`, `for`, `while`, `return`/`break`/`continue`,
+`new`/`delete`, `cout`/`cin`/`endl`, pointers, `nullptr`, reference parameters.
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+Not supported: classes with methods, templates, inheritance, operator
+overloading, `map`/`set`/`sort`/`<algorithm>`, range-based `for`, `auto`,
+multiple files, 2D arrays, array parameters (`int a[]`), string indexing and
+`.length()`. `#` lines are discarded by the tokenizer; includes are never
+processed.
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+Unsupported input fails with a deliberate C++-level message rather than
+pretending to run.
 
-Follow these steps:
+## Running locally
+
+Requires Node.js.
 
 ```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
+npm install
+npm run dev      # dev server
+npm run build    # production build
 ```
 
-**Edit a file directly in GitHub**
+## Tests
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+Two layers, sharing one set of 38 graded programs and one grading module
+(`tests/classify.mjs`), so they cannot disagree.
 
-**Use GitHub Codespaces**
+**Standalone harness** — grades failure *mode*, not just pass/fail, ranked by
+severity: `WRONG` (silent wrong answer) is worse than a hang, worse than a
+leaked JS error, worse than a deliberate C++-level error.
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+```sh
+npx esbuild src/lib/cpp-engine.ts --bundle --format=esm --outfile=tests/engine.mjs
+node tests/run.mjs
+```
 
-## What technologies are used for this project?
+**Vitest regression guard** — `src/test/ladder.test.ts` pins every program's
+status by id, so a regression fails naming the program. It is severity-aware:
+improving a program never fails the suite, regressing one always does.
 
-This project is built with:
+```sh
+./node_modules/.bin/vitest run
+./node_modules/.bin/tsc --noEmit
+```
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+Use the `node_modules/.bin/` paths. Bare `npx tsc` will silently download an
+unrelated abandoned package named `tsc` and exit 0, which reads as a clean
+typecheck while checking nothing.
 
-## How can I deploy this project?
+Current state: **29/38 passing**. The remaining failures are catalogued in
+`CLAUDE.md` (known bugs) and `PLAN.md` (the fix plan) — they are tracked
+deliberately, not undiscovered.
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+## Tech stack
 
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+Vite · React 18 · TypeScript · Tailwind · shadcn/ui · Monaco editor ·
+framer-motion
