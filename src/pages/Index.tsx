@@ -38,7 +38,6 @@ int main() {
   const [speed, setSpeed] = useState(500);
   const [error, setError] = useState<string | null>(null);
   const [stdin, setStdin] = useState('');
-  const [stdinOpen, setStdinOpen] = useState(false);
   const [exampleName, setExampleName] = useState<string | null>(null);
 
   const currentStep = stepIndex >= 0 && stepIndex < steps.length ? steps[stepIndex] : null;

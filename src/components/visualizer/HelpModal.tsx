@@ -23,7 +23,7 @@ const SUPPORTED = [
 
 const LIMITATIONS = [
   '2D arrays not yet supported',
-  'Brace initialization (Node a{1, nullptr};) not yet supported',
+  'Brace initialization of a stack variable (Node a{1, nullptr};) not yet supported — but new Node{1, nullptr} on the heap does work',
   'Advanced C++ / STL features (maps, sets, templates, …) are out of scope',
   'Some complex global initializer expressions may fall back to 0',
 ];
