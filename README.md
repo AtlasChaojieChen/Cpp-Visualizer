@@ -75,9 +75,10 @@ Use the `node_modules/.bin/` paths. Bare `npx tsc` will silently download an
 unrelated abandoned package named `tsc` and exit 0, which reads as a clean
 typecheck while checking nothing.
 
-Current state: **29/38 passing**. The remaining failures are catalogued in
-`CLAUDE.md` (known bugs) and `PLAN.md` (the fix plan) — they are tracked
-deliberately, not undiscovered.
+Current state: **35/38 passing, with zero `WRONG` results** — every remaining
+failure is a deliberate C++-level error on a genuinely unsupported feature
+(array parameters, string indexing, 2D arrays), not a silent wrong answer.
+They are catalogued in `CLAUDE.md` under "Known limitations".
 
 ## Tech stack
 

@@ -1,10 +1,62 @@
-# cpp-visualizer
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## cpp-visualizer
 
 A browser-based C++ execution visualizer. Users paste C++, step through it, and watch
 the call stack, variables, heap, arrays, and trees change.
 
 **There is no compiler and no backend.** A hand-written interpreter runs the code in
 the browser tab. Deployed on Vercel as a static site.
+
+## Commands
+
+Package manager is **npm** (a `bun.lock` also exists — ignore it).
+
+```sh
+npm install
+npm run dev        # vite dev server
+npm run build      # production build
+npm run lint       # eslint — SEE BELOW, currently red
+```
+
+`npm run lint` does not pass and never has (42 errors on `main` before this
+branch's work). Almost all of it is `@typescript-eslint/no-explicit-any` inside
+`cpp-engine.ts`, which is inherent to the untagged-value design described under
+Architecture — "fixing" it by adding types would contradict that design. **Lint
+is not part of the verification gate.** Don't treat a red lint as something you
+broke, and don't do a typing sweep to clear it unless asked.
+
+**Verification — run all four before claiming done.** They are ordered; step 1
+regenerates the bundle step 2 reads.
+
+```sh
+npx esbuild src/lib/cpp-engine.ts --bundle --format=esm --outfile=tests/engine.mjs
+node tests/run.mjs                    # 38-program ladder, graded by severity
+./node_modules/.bin/tsc --noEmit
+./node_modules/.bin/vitest run
+```
+
+Use the `node_modules/.bin/` paths. **Never `npx tsc`** — with `node_modules`
+missing, npx downloads an unrelated abandoned package called `tsc`, prints a
+banner and exits 0, which reads as a clean typecheck while checking nothing.
+
+`tests/engine.mjs` is a build artifact and gitignored. **Rebuild it before
+`node tests/run.mjs`** or you are grading a stale engine — the single easiest
+mistake to make here.
+
+Narrowing the run:
+
+```sh
+./node_modules/.bin/vitest run src/test/type-tracking.test.ts   # one file
+./node_modules/.bin/vitest run -t "wraps INT_MAX"               # one test by name
+./node_modules/.bin/vitest                                      # watch mode
+```
+
+`tests/run.mjs` takes no filter argument — it always runs all 38 and finishes in
+about a second. To debug one program, find it by id in `tests/programs.js` and
+call `executeCode` on it from a vitest test instead.
 
 ## Architecture
 
@@ -45,9 +97,11 @@ the browser tab. Deployed on Vercel as a static site.
   VariableInspector, HeapView, ArrayVisualizer, TreeVisualizer, OutputPanel,
   ExecutionControls, HelpModal)
 - `src/components/ui/` — generated shadcn. **Never edit these.**
-- `tests/` — standalone harness: `programs.js` (38 graded test programs) and
-  `run.mjs`. Run with:
-  `npx esbuild src/lib/cpp-engine.ts --bundle --format=esm --outfile=tests/engine.mjs && node tests/run.mjs`
+- `tests/` — the standalone harness: `programs.js` (38 graded programs),
+  `classify.mjs` (the grading logic) and `run.mjs`.
+- `src/test/` — vitest. `ladder.test.ts` imports the SAME programs and the SAME
+  `classify.mjs` as the harness, so the two can never disagree about what
+  "passing" means.
 
 ## Supported C++ subset
 
@@ -122,19 +176,16 @@ were either fixed or never true. Don't re-add them:
 - React 18, not 19. `@types/react` is 18.x. Don't write React 19 idioms.
 - **Do not upgrade dependencies.** Everything is a major version behind and that's
   fine. Upgrades are out of scope unless I explicitly ask.
-- Package manager: there's both a `bun.lock` and a `package-lock.json`. Use npm.
+- Vitest runs in `jsdom` with `globals: true` and `@` aliased to `src/`; only
+  `src/**/*.{test,spec}.{ts,tsx}` is collected, so `tests/` is harness-only.
+- Themes come from `next-themes` as a `dark` class on `<html>`. Anything with a
+  hardcoded colour must be checked in BOTH themes — that has broken twice.
 
 ## Rules
 
 - Every engine change needs a test in `src/test/` that fails before and passes after.
 - Never edit `src/components/ui/`.
-- Before saying you're done, run all four:
-  `npx esbuild src/lib/cpp-engine.ts --bundle --format=esm --outfile=tests/engine.mjs`,
-  `node tests/run.mjs`, `./node_modules/.bin/tsc --noEmit`,
-  `./node_modules/.bin/vitest run`.
-  Use the `node_modules/.bin/` paths. **Never `npx tsc`** — with `node_modules`
-  missing, npx downloads an unrelated abandoned package called `tsc`, prints a
-  banner and exits 0, which reads as a clean typecheck while checking nothing.
+- Run all four verification commands (see **Commands**) before saying you're done.
 - Show me the diff before moving to the next task. One commit per logical change.
 - If a task turns out to need a change to the snapshot-recording model, or to how
   types flow through `evalExpr`, stop and explain before writing code.
