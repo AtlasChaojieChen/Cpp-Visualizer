@@ -553,7 +553,10 @@ class Parser {
 
   private parsePrimary(): ASTNode {
     const p = this.peek();
-    if (p.type === 'number') { this.advance(); return { type: 'NumberLit', value: Number(p.value), line: p.line }; }
+    // `isFloat` comes from the LEXEME, not the value: `Number('7.0')` is 7, so
+    // by the time the interpreter sees it a double literal is indistinguishable
+    // from an int one. This is the single bit that made `7.0 / 2` truncate.
+    if (p.type === 'number') { this.advance(); return { type: 'NumberLit', value: Number(p.value), isFloat: p.value.includes('.'), line: p.line }; }
     if (p.type === 'string') { this.advance(); return { type: 'StringLit', value: p.value, line: p.line }; }
     if (p.type === 'char') { this.advance(); return { type: 'CharLit', value: p.value, line: p.line }; }
     if (p.type === 'keyword' && p.value === 'true') { this.advance(); return { type: 'BoolLit', value: true, line: p.line }; }
@@ -622,6 +625,11 @@ class Parser {
 
 // Assigning a char into one of these yields its ASCII code, per C++ promotion.
 const NUMERIC_TYPES = new Set(['int', 'short', 'long', 'float', 'double']);
+
+// `/` truncates when the expression's static type is integral. `char` and
+// `bool` promote to int in arithmetic, so they count.
+const INTEGRAL_TYPES = new Set(['int', 'short', 'long', 'char', 'bool']);
+const COMPARISON_OPS = new Set(['==', '!=', '<', '>', '<=', '>=', '&&', '||']);
 
 class ReturnSignal { constructor(public value: any) {} }
 class BreakSignal {}
@@ -836,6 +844,53 @@ class Interpreter {
 
   private IsCharExpr(expr: ASTNode): boolean {
     return this.DeclaredTypeOf(expr) === 'char'; // exact: 'char*' is a pointer, not a char
+  }
+
+  // ---- static types (Stage 5) ----------------------------------------------
+  //
+  // `DeclaredTypeOf` answers only for expressions whose type was WRITTEN DOWN.
+  // `StaticTypeOf` extends it to composite expressions, which is what `/` needs:
+  // whether a division truncates depends on the operands' types, and `7.0` and
+  // `7` are the same JS number by the time `/` sees them. No value
+  // representation changes — this is a read-only walk over the AST, so the
+  // snapshot format and every UI panel are untouched.
+  //
+  // `null` means "not written down anywhere", and every caller falls back to
+  // the previous runtime behaviour rather than guessing.
+
+  // Only the integral/floating distinction matters here, so all integral types
+  // collapse to 'int'. A known floating operand is decisive even when the other
+  // side is unknown, because in C++ it always makes the result floating.
+  private ArithResultType(l: string | null, r: string | null): string | null {
+    const Floating = (t: string | null) => t === 'double' || t === 'float';
+    if (Floating(l) || Floating(r)) return 'double';
+    if (l === 'string' || r === 'string') return 'string';
+    if (l === null || r === null) return null;
+    return 'int';
+  }
+
+  private StaticTypeOf(expr: ASTNode): string | null {
+    switch (expr.type) {
+      case 'NumberLit': return expr.isFloat ? 'double' : 'int';
+      case 'BoolLit': return 'bool';
+      case 'Binary': {
+        if (COMPARISON_OPS.has(expr.operator)) return 'bool';
+        return this.ArithResultType(this.StaticTypeOf(expr.left), this.StaticTypeOf(expr.right));
+      }
+      case 'Unary': return expr.operator === '!' ? 'bool' : this.StaticTypeOf(expr.operand);
+      case 'Assign': return this.StaticTypeOf(expr.target);
+      case 'CompoundAssign': return this.StaticTypeOf(expr.target);
+      case 'Deref': {
+        const t = this.StaticTypeOf(expr.operand);
+        return t && t.endsWith('*') ? t.slice(0, -1) : null;
+      }
+      case 'AddressOf': {
+        const t = this.StaticTypeOf(expr.operand);
+        return t ? t + '*' : null;
+      }
+      // Everything else is a place where a type was written down.
+      default: return this.DeclaredTypeOf(expr);
+    }
   }
 
   // `+`/`-` are char arithmetic when a declared char is involved and no operand
@@ -1215,7 +1270,13 @@ class Interpreter {
             if (this.IsCharArith(expr.left, l, expr.right, r)) return this.CharCode(l) - this.CharCode(r);
             return l - r;
           case '*': return l * r;
-          case '/': return Number.isInteger(l) && Number.isInteger(r) ? Math.trunc(l / r) : l / r;
+          case '/': {
+            // C++ picks `/`'s meaning from the operands' STATIC types. Fall back
+            // to the old value-based guess only where no type was written down.
+            const t = this.StaticTypeOf(expr);
+            const integral = t === null ? Number.isInteger(l) && Number.isInteger(r) : INTEGRAL_TYPES.has(t);
+            return integral ? Math.trunc(l / r) : l / r;
+          }
           case '%': return l % r;
           case '==': return l === r;
           case '!=': return l !== r;

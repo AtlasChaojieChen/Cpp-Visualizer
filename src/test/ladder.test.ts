@@ -28,7 +28,7 @@ type Status = 'PASS' | 'PASS-GARBAGE' | 'CLEAN-ERROR' | 'JS-ERROR' | 'WRONG';
 // arithmetic): 33 PASS, 3 CLEAN-ERROR, 2 WRONG.
 // Previously 30 PASS, 1 PASS-GARBAGE, 3 CLEAN-ERROR, 1 JS-ERROR, 3 WRONG.
 const BASELINE: Record<string, Status> = {
-  A1: 'WRONG',        // `/` truncates doubles — Stage 5 (design first)
+  A1: 'PASS',         // Stage 5: `/` consults the static type of the expression
   A2: 'PASS',
   A3: 'PASS',
   A4: 'PASS',

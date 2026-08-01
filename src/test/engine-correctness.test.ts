@@ -300,17 +300,10 @@ int main() {
 });
 
 // ===================== scope guard =====================
-
-// These are the SCHEDULED design-stage bugs. They are asserted at their current
-// (wrong) behaviour on purpose: if a later change fixes them, this block fails
-// and forces the fix to be acknowledged rather than smuggled in. The char work
-// deliberately routes around them.
-describe('untouched by this stage (scheduled design work)', () => {
-  it('still truncates double division', () => {
-    const { output } = Main('double d = 7.0 / 2;\ncout << d << endl;');
-    expect(output.trim()).toBe('3');
-  });
-
-  // 32-bit overflow was the other guard here. Stage 5 fixed it; the assertion
-  // moved to src/test/type-tracking.test.ts rather than being deleted.
-});
+//
+// This file used to end with a block pinning two bugs at their WRONG behaviour
+// — double division and 32-bit overflow — so that fixing either would fail the
+// suite and force the change to be acknowledged rather than smuggled in.
+//
+// It worked: Stage 5 fixed both, and this block failed. Both assertions now
+// live in src/test/type-tracking.test.ts asserting the CORRECT behaviour.
