@@ -311,8 +311,6 @@ describe('untouched by this stage (scheduled design work)', () => {
     expect(output.trim()).toBe('3');
   });
 
-  it('still does not wrap 32-bit integers', () => {
-    const { output } = Main('int x = 2147483647;\nx = x + 1;\ncout << x << endl;');
-    expect(output.trim()).toBe('2147483648');
-  });
+  // 32-bit overflow was the other guard here. Stage 5 fixed it; the assertion
+  // moved to src/test/type-tracking.test.ts rather than being deleted.
 });

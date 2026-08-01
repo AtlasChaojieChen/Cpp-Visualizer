@@ -866,7 +866,13 @@ class Interpreter {
     if (base === 'char' && typeof value === 'number')
       return String.fromCharCode(((Math.trunc(value) % 256) + 256) % 256);
     if (typeof value === 'string' && value.length === 1 && NUMERIC_TYPES.has(base))
-      return value.charCodeAt(0);
+      value = value.charCodeAt(0);
+    // C++ `int` is 32-bit two's complement and wraps on overflow; a JS number is
+    // a double and does not. `| 0` IS that wrap, and it also truncates
+    // `int x = 3.7` to 3 (toward zero, as C++ does). Only `int` narrows: `long`
+    // and `long long` are not in the supported subset, and wrapping them at 32
+    // bits would be wrong. `base` excludes `int*` — pointers hold addresses.
+    if (base === 'int' && typeof value === 'number') return value | 0;
     return value;
   }
 
@@ -882,15 +888,21 @@ class Interpreter {
     else v.value = nv;
   }
 
+  // Plain assignment narrows to the target's declared type, exactly as
+  // declaration and compound assignment already did. Arrays and pointers pass
+  // through untouched: CoerceToDeclared only converts numbers and 1-char
+  // strings, and a pointer's `base` still carries its `*`.
   private setVar(name: string, value: any): void {
     for (let i = this.callStack.length - 1; i >= 0; i--) {
-      if (this.callStack[i].vars.has(name)) {
-        this.writeEntry(this.callStack[i].vars.get(name)!, value);
+      const entry = this.callStack[i].vars.get(name);
+      if (entry) {
+        this.writeEntry(entry, entry.isArray ? value : this.CoerceToDeclared(entry.type, value));
         return;
       }
     }
-    if (this.globalVars.has(name)) {
-      this.writeEntry(this.globalVars.get(name)!, value);
+    const g = this.globalVars.get(name);
+    if (g) {
+      this.writeEntry(g, g.isArray ? value : this.CoerceToDeclared(g.type, value));
       return;
     }
     throw new Error(`Undefined variable '${name}'`);

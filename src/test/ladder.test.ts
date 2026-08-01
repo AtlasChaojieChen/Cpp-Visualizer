@@ -46,7 +46,7 @@ const BASELINE: Record<string, Status> = {
   B8: 'PASS',
   B9: 'CLEAN-ERROR',  // string indexing / .length() unsupported — out of scope
   B10: 'PASS',        // char arithmetic promotes to ASCII — Stage 4 (was WRONG)
-  B11: 'WRONG',       // no 32-bit wraparound — folded into Stage 5
+  B11: 'PASS',        // Stage 5: 32-bit wraparound via CoerceToDeclared
   B12: 'PASS',
   B13: 'CLEAN-ERROR', // 2D arrays unsupported — out of scope
   B14: 'PASS',
