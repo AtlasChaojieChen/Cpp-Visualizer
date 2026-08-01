@@ -110,7 +110,18 @@ call `executeCode` on it from a vitest test instead.
 
 int, float, double, char, bool, void, string, vector, struct (data only, no methods),
 if/else/for/while, return/break/continue, new/delete, cout/cin/endl, pointers,
-nullptr, reference parameters.
+nullptr, reference parameters, bitwise operators.
+
+Bitwise: `& | ^ ~ << >>` and `&= |= ^= <<= >>=`, at full C++ precedence, plus hex
+(`0xff`) and binary (`0b1010`) literals. Operands must be integral — a `double`
+operand is an error rather than a guess, and shift counts outside 0..31 are
+rejected instead of being silently masked to 5 bits the way JS would.
+
+`<<`/`>>` were already spoken for by `cout`/`cin`, and C++ resolves that with
+precedence alone: shifts bind looser than `+`, so `parseCout`/`parseCin` read
+each stream operand at **addition** precedence. `cout << a << b` is therefore two
+insertions and `cout << (a << 2)` needs its parentheses — exactly as in real C++.
+Do not "simplify" those two call sites back to `parseExpr`; that is the bug.
 
 NOT supported: classes with methods, templates, inheritance, operator overloading,
 map/set/sort/`<algorithm>`, range-based for, `auto`, multiple files, 2D arrays,
@@ -118,10 +129,18 @@ array parameters (`int a[]`), string indexing and `.length()`.
 
 `#` lines are discarded by the tokenizer. Includes are never processed.
 
+The tokenizer also discards stream-setup statements — `ios::sync_with_stdio(...)`,
+`ios_base::sync_with_stdio(...)`, `cin.tie(...)`, `cout.tie(...)`, with or without a
+`std::` prefix. They are no-ops for an interpreter with no real iostreams, but they
+use `::`, which is outside the subset, so they used to stop the parser on the first
+line of any competitive-programming paste. The match is anchored per STATEMENT, not
+per line, so `ios::sync_with_stdio(0); int x = 5;` keeps the declaration, and line
+numbers stay intact for the editor's highlighting.
+
 ## Known limitations — do not "discover" and silently fix these
 
-Verified 31 July 2026, after the `docs/PLAN.md` stages. If a task touches one of
-these, say so; don't fix it as a side effect of something else.
+Verified 1 August 2026, after bitwise operators. If a task touches one of these,
+say so; don't fix it as a side effect of something else.
 
 The ladder (`tests/run.mjs`) sits at **35/38**, with **zero WRONG** results —
 every remaining failure is a clean C++-level error on a genuinely unsupported
@@ -140,6 +159,12 @@ feature, not a silent wrong answer.
   but a layout project rather than a bug fix.
 - Out-of-bounds array access throws rather than modelling adjacent memory. That
   is deliberate for a teaching tool — see the comment on `checkIndex`.
+- A `bool` does not decay to 0/1. `cout << (a == b)` prints `true`, not `1`, and
+  `int r = (a == b);` stores `false` rather than `0` — `CoerceToDeclared` only
+  narrows `typeof value === 'number'`, so a boolean passes through untouched.
+  Found while adding bitwise operators (Aug 2026) and deliberately left alone;
+  fixing it means touching how values flow into `CoerceToDeclared`, which is the
+  type-tracking design, not a one-liner.
 
 **Corrections to earlier versions of this file** — these were listed as bugs and
 were either fixed or never true. Don't re-add them:
