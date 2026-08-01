@@ -1244,7 +1244,9 @@ class Interpreter {
           case '+=': nv = this.IsCharArith(expr.target, cur, expr.value, r) ? this.CharCode(cur) + this.CharCode(r) : cur + r; break;
           case '-=': nv = this.IsCharArith(expr.target, cur, expr.value, r) ? this.CharCode(cur) - this.CharCode(r) : cur - r; break;
           case '*=': nv = cur * r; break;
-          case '/=': nv = Math.trunc(cur / r); break;
+          // Divide honestly. The result lands in the target, so the narrowing
+          // below truncates it when — and only when — the target is integral.
+          case '/=': nv = cur / r; break;
           case '%=': nv = cur % r; break;
           default: throw new Error(`Unknown operator '${expr.operator}'`);
         }

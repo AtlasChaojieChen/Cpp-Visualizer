@@ -110,3 +110,41 @@ int main() {
     expect(output.trim()).toBe('hello world');
   });
 });
+
+// ===================== 2. `/=` =====================
+
+// `/=` truncated unconditionally (`Math.trunc(cur / r)`), so it was wrong even
+// when neither operand was integral. It now divides honestly and lets the
+// narrowing that already ran on the result do the truncating — which means an
+// int target still truncates and a double target no longer does.
+describe('compound division assignment', () => {
+  it('does not truncate a double target', () => {
+    const { output } = Main('double d = 1;\nd /= 2;\ncout << d << endl;');
+    expect(output.trim()).toBe('0.5');
+  });
+
+  it('does not truncate a double target holding a fraction', () => {
+    const { output } = Main('double d = 7.5;\nd /= 3;\ncout << d << endl;');
+    expect(output.trim()).toBe('2.5');
+  });
+
+  it('still truncates an int target', () => {
+    const { output } = Main('int x = 7;\nx /= 2;\ncout << x << endl;');
+    expect(output.trim()).toBe('3');
+  });
+
+  it('truncates an int target toward zero when negative', () => {
+    const { output } = Main('int x = -7;\nx /= 2;\ncout << x << endl;');
+    expect(output.trim()).toBe('-3');
+  });
+
+  it('does not truncate a double array element', () => {
+    const { output } = Main('double a[1];\na[0] = 1;\na[0] /= 4;\ncout << a[0] << endl;');
+    expect(output.trim()).toBe('0.25');
+  });
+
+  it('leaves the other compound operators alone', () => {
+    const { output } = Main('int i = 5;\ni += 3;\ni -= 1;\ni *= 2;\ni %= 5;\ncout << i << endl;');
+    expect(output.trim()).toBe('4');
+  });
+});
