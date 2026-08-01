@@ -110,7 +110,7 @@ call `executeCode` on it from a vitest test instead.
 
 int, float, double, char, bool, void, string, vector, struct (data only, no methods),
 if/else/for/while, return/break/continue, new/delete, cout/cin/endl, pointers,
-nullptr, reference parameters, bitwise operators.
+nullptr, reference parameters, bitwise operators, string indexing and methods.
 
 Bitwise: `& | ^ ~ << >>` and `&= |= ^= <<= >>=`, at full C++ precedence, plus hex
 (`0xff`) and binary (`0b1010`) literals. Operands must be integral — a `double`
@@ -123,9 +123,25 @@ each stream operand at **addition** precedence. `cout << a << b` is therefore tw
 insertions and `cout << (a << 2)` needs its parentheses — exactly as in real C++.
 Do not "simplify" those two call sites back to `parseExpr`; that is the bug.
 
+String/vector methods: `size` `length` `empty` `front` `back` `clear` `begin` `end`
+`erase`, plus `push_back`/`pop_back` on vectors. `s[i]` reads AND writes — a JS
+string is immutable, so a write rebuilds the value and pushes it back through
+`writeEntry`, which keeps reference parameters aliasing correctly.
+
+**An iterator is a plain integer offset.** `begin()` is 0, `end()` is `size()`, so
+`a.begin() + i` is ordinary arithmetic needing no new value type — nothing new
+reaches a snapshot and every panel renders as before. The cost is that
+`s.erase(s.begin() + 3)` and `s.erase(3)` both arrive as the number 3 while meaning
+different things in C++ (erase one character, versus erase from 3 to the end).
+`EraseFrom` recovers the difference from the AST via `IsIteratorExpr`, not from the
+value — the same read-only-walk trick `StaticTypeOf` uses for `/`. A bare `*it` or
+`it++` is therefore NOT modelled and will silently behave like integer arithmetic;
+that is the known price of this model, so don't be surprised by it.
+
 NOT supported: classes with methods, templates, inheritance, operator overloading,
 map/set/sort/`<algorithm>`, range-based for, `auto`, multiple files, 2D arrays,
-array parameters (`int a[]`), string indexing and `.length()`.
+array parameters (`int a[]`), dereferencing or incrementing an iterator,
+`substr`/`find`/`insert`/`push_back` on strings.
 
 `#` lines are discarded by the tokenizer. Includes are never processed.
 
@@ -139,16 +155,15 @@ numbers stay intact for the editor's highlighting.
 
 ## Known limitations — do not "discover" and silently fix these
 
-Verified 1 August 2026, after bitwise operators. If a task touches one of these,
-say so; don't fix it as a side effect of something else.
+Verified 1 August 2026, after bitwise operators and string ops. If a task touches
+one of these, say so; don't fix it as a side effect of something else.
 
-The ladder (`tests/run.mjs`) sits at **35/38**, with **zero WRONG** results —
+The ladder (`tests/run.mjs`) sits at **36/38**, with **zero WRONG** results —
 every remaining failure is a clean C++-level error on a genuinely unsupported
 feature, not a silent wrong answer.
 
 **Unsupported features (parser + interpreter work, not bugs):**
 - Array parameters `int a[]` (B3).
-- String indexing and `.length()` (B9).
 - 2D arrays (B13).
 - Everything in the NOT-supported list above.
 
@@ -177,6 +192,10 @@ were either fixed or never true. Don't re-add them:
   one speed, pointer args printing in decimal, and missing `aria-label`s on the
   transport buttons: fixed in Stages 1 and 2.
 - Function return values not being recorded: fixed in Stage 6.
+- `ios::sync_with_stdio(...)` stopping the parser: fixed with the bitwise
+  operators; the tokenizer now discards stream-setup statements.
+- String indexing and `.length()` (B9): fixed by the string-ops change. B9 is
+  now PASS on the ladder.
 - "The scrubber is a custom div, so it has no keyboard support" was **wrong**.
   It is a shadcn/Radix `<Slider>` and has always been keyboard-accessible.
 - The decimal-pointer bug was described as living only in `CallStackView`. An

@@ -1130,17 +1130,81 @@ class Interpreter {
   // model, so the honest teaching answer is to name the index and the bounds.
   // Silently returning JS `undefined` (reads) or growing the JS array (writes)
   // both taught a false model of what a fixed-size array is.
-  private checkIndex(arr: any[], idx: any, expr: ASTNode): number {
-    const label = expr.type === 'ArrayAccess' && expr.array.type === 'Identifier' ? `'${expr.array.name}'` : 'array';
+  // Also indexes a `string`, which is a JS string: `.length` and `[i]` read the
+  // same way, and a one-character string is already how this engine represents
+  // a char, so `s[i]` needs no conversion on the way out.
+  private checkIndex(arr: any[] | string, idx: any, expr: ASTNode): number {
+    const noun = typeof arr === 'string' ? 'String' : 'Array';
+    const label = expr.type === 'ArrayAccess' && expr.array.type === 'Identifier' ? `'${expr.array.name}'` : noun.toLowerCase();
     if (typeof idx !== 'number' || !Number.isInteger(idx))
-      throw new Error(`Array index must be an integer, got '${idx}' at line ${expr.line}`);
+      throw new Error(`${noun} index must be an integer, got '${idx}' at line ${expr.line}`);
     if (idx < 0 || idx >= arr.length)
       throw new Error(
-        `Array index out of bounds: ${label}[${idx}] — valid indices are ` +
+        `${noun} index out of bounds: ${label}[${idx}] — valid indices are ` +
         (arr.length === 0 ? 'none (size 0)' : `0..${arr.length - 1}`) +
         ` at line ${expr.line}`,
       );
     return idx;
+  }
+
+  // ---- iterators ------------------------------------------------------------
+  //
+  // `begin()`/`end()` return plain integer offsets, so `a.begin() + i` is
+  // ordinary arithmetic and no new value type reaches a snapshot. The cost is
+  // that `s.erase(s.begin() + 3)` and `s.erase(3)` both arrive as the number 3
+  // while meaning different things in C++ — erase ONE character, versus erase
+  // from index 3 to the end. The difference is recovered from the AST instead
+  // of the value: an argument whose expression tree contains a `begin()`/`end()`
+  // call is an iterator. Same read-only-walk trick `StaticTypeOf` uses for `/`.
+  private IsIteratorExpr(e: ASTNode | null | undefined): boolean {
+    if (!e) return false;
+    if (e.type === 'Call' && e.callee?.type === 'MemberAccess')
+      return e.callee.member === 'begin' || e.callee.member === 'end';
+    if (e.type === 'Binary') return this.IsIteratorExpr(e.left) || this.IsIteratorExpr(e.right);
+    return false;
+  }
+
+  private checkOffset(container: any[] | string, n: any, what: string, line: number): number {
+    if (typeof n !== 'number' || !Number.isInteger(n))
+      throw new Error(`erase() ${what} must be an integer, got '${n}' at line ${line}`);
+    if (n < 0 || n > container.length)
+      throw new Error(`erase() ${what} ${n} is out of range (size ${container.length}) at line ${line}`);
+    return n;
+  }
+
+  // The four overloads this covers, picked apart by IsIteratorExpr:
+  //   erase(it)        one element at it
+  //   erase(it, it2)   the half-open range [it, it2)
+  //   erase(pos)       string only: from pos to the end
+  //   erase(pos, len)  string only: len characters at pos
+  private EraseFrom(entry: VarEntry, container: any[] | string, expr: ASTNode, args: any[]): any {
+    const line = expr.line;
+    const iter = this.IsIteratorExpr(expr.args[0]);
+    let from: number, to: number;
+    if (iter) {
+      from = this.checkOffset(container, args[0], 'iterator', line);
+      to = args.length > 1 ? this.checkOffset(container, args[1], 'iterator', line) : from + 1;
+      // erase(it) on end() has nothing to remove; a range may legally be empty.
+      if (args.length === 1 && from >= container.length)
+        throw new Error(`erase() iterator ${from} is out of range (size ${container.length}) at line ${line}`);
+    } else {
+      if (Array.isArray(container))
+        throw new Error(`vector::erase() takes an iterator — use v.begin() + n — at line ${line}`);
+      from = this.checkOffset(container, args[0] ?? 0, 'position', line);
+      to = args.length > 1 ? from + this.checkOffset(container, args[1], 'count', line) : container.length;
+    }
+    if (to < from) throw new Error(`erase() range [${from}, ${to}) is inverted at line ${line}`);
+    to = Math.min(to, container.length);
+
+    if (typeof container === 'string') {
+      // Immutable in JS, so rebuild and write the whole value back.
+      this.writeEntry(entry, container.slice(0, from) + container.slice(to));
+      return from;
+    }
+    // A vector is mutated in place, which is what keeps a reference parameter
+    // and the caller's storage in agreement.
+    container.splice(from, to - from);
+    return from;
   }
 
   private declareVar(name: string, type: string, value: any, isPointer = false, isArray = false): void {
@@ -1483,14 +1547,17 @@ class Interpreter {
       case 'PrefixDec': { const v = this.StepValue(expr.operand, this.evalLValue(expr.operand), -1); this.assignTo(expr.operand, v); return v; }
       case 'ArrayAccess': {
         const arr = this.evalExpr(expr.array), idx = this.evalExpr(expr.index);
-        // Track array access for visualization
-        if (expr.array.type === 'Identifier' && typeof idx === 'number') {
+        // Track array access for visualization. Strings are excluded: the
+        // ArrayVisualizer renders element cells, and a string is one value.
+        if (Array.isArray(arr) && expr.array.type === 'Identifier' && typeof idx === 'number') {
           // Try to find the label from the index expression (e.g. a[l] → label "l")
           const label = expr.index.type === 'Identifier' ? expr.index.name : String(idx);
           this.currentArrayAccesses.push({ arrayName: expr.array.name, index: idx, label });
         }
         if (Array.isArray(arr)) return arr[this.checkIndex(arr, idx, expr)];
-        throw new Error('Not an array');
+        // `s[i]` yields a one-character string, which IS this engine's char.
+        if (typeof arr === 'string') return arr[this.checkIndex(arr, idx, expr)];
+        throw new Error(`Not an array or string at line ${expr.line}`);
       }
       case 'Call': {
         // Handle member function calls (e.g., v.push_back(x), v.size())
@@ -1511,26 +1578,42 @@ class Interpreter {
             if (!Array.isArray(obj.value)) throw new Error(`${expr.callee.object.name} is not a vector`);
             return obj.value.pop();
           }
-          if (method === 'size') {
-            if (Array.isArray(obj.value)) return obj.value.length;
-            if (typeof obj.value === 'string') return obj.value.length;
-            throw new Error(`${expr.callee.object.name} has no size()`);
+          const sized = Array.isArray(obj.value) || typeof obj.value === 'string';
+          if (method === 'size' || method === 'length') {
+            if (sized) return obj.value.length;
+            throw new Error(`${expr.callee.object.name} has no ${method}()`);
           }
           if (method === 'empty') {
-            if (Array.isArray(obj.value)) return obj.value.length === 0;
+            if (sized) return obj.value.length === 0;
             throw new Error(`${expr.callee.object.name} has no empty()`);
           }
+          // An iterator is a plain integer offset — see EraseFrom. This is what
+          // makes `a.begin() + i` work with no new value type and therefore no
+          // change to the snapshot format.
+          if (method === 'begin') {
+            if (sized) return 0;
+            throw new Error(`${expr.callee.object.name} has no begin()`);
+          }
+          if (method === 'end') {
+            if (sized) return obj.value.length;
+            throw new Error(`${expr.callee.object.name} has no end()`);
+          }
           if (method === 'front') {
-            if (Array.isArray(obj.value)) return obj.value[0];
+            if (sized) return obj.value[0];
             throw new Error(`${expr.callee.object.name} has no front()`);
           }
           if (method === 'back') {
-            if (Array.isArray(obj.value)) return obj.value[obj.value.length - 1];
+            if (sized) return obj.value[obj.value.length - 1];
             throw new Error(`${expr.callee.object.name} has no back()`);
           }
           if (method === 'clear') {
             if (Array.isArray(obj.value)) { obj.value.length = 0; return undefined; }
+            if (typeof obj.value === 'string') { this.writeEntry(entry, ''); return undefined; }
             throw new Error(`${expr.callee.object.name} has no clear()`);
+          }
+          if (method === 'erase') {
+            if (!sized) throw new Error(`${expr.callee.object.name} has no erase()`);
+            return this.EraseFrom(entry, obj.value, expr, args);
           }
           throw new Error(`Unknown method '${method}'`);
         }
@@ -1631,7 +1714,7 @@ class Interpreter {
     }
     if (expr.type === 'ArrayAccess') {
       const arr = this.evalExpr(expr.array), idx = this.evalExpr(expr.index);
-      if (!Array.isArray(arr)) throw new Error('Not an array');
+      if (!Array.isArray(arr) && typeof arr !== 'string') throw new Error(`Not an array or string at line ${expr.line}`);
       return arr[this.checkIndex(arr, idx, expr)];
     }
     if (expr.type === 'Deref') return this.evalExpr(expr);
@@ -1646,7 +1729,16 @@ class Interpreter {
       const v = this.lookupVar(target.array.name);
       if (!v) throw new Error(`Undefined array '${target.array.name}'`);
       const arr = this.readEntry(v);
-      if (!Array.isArray(arr)) throw new Error(`'${target.array.name}' is not an array at line ${target.line}`);
+      // A JS string is immutable, so `s[i] = c` rebuilds it and writes the whole
+      // value back through the entry — which also keeps a reference parameter
+      // pointing at the caller's storage working.
+      if (typeof arr === 'string') {
+        const i = this.checkIndex(arr, this.evalExpr(target.index), target);
+        const ch = typeof value === 'string' ? value[0] : String.fromCharCode(value);
+        this.writeEntry(v, arr.slice(0, i) + ch + arr.slice(i + 1));
+        return;
+      }
+      if (!Array.isArray(arr)) throw new Error(`'${target.array.name}' is not an array or string at line ${target.line}`);
       arr[this.checkIndex(arr, this.evalExpr(target.index), target)] = this.CoerceToDeclared(this.ElementType(v.type), value);
       return;
     }

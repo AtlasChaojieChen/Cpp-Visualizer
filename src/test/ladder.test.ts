@@ -24,9 +24,11 @@ import { Classify, RANK } from '../../tests/classify.mjs';
 
 type Status = 'PASS' | 'PASS-GARBAGE' | 'CLEAN-ERROR' | 'JS-ERROR' | 'WRONG';
 
-// Verified 2026-07-31 after Stage 4 (call-depth cap, array bounds, char
-// arithmetic): 33 PASS, 3 CLEAN-ERROR, 2 WRONG.
-// Previously 30 PASS, 1 PASS-GARBAGE, 3 CLEAN-ERROR, 1 JS-ERROR, 3 WRONG.
+// Verified 2026-08-01 after string ops (indexing, length/empty, iterator-based
+// erase): 36 PASS, 2 CLEAN-ERROR, 0 WRONG. B9 moved CLEAN-ERROR -> PASS.
+// Previously 35 PASS, 3 CLEAN-ERROR. Before Stage 4: 33 PASS, 3 CLEAN-ERROR,
+// 2 WRONG; before that 30 PASS, 1 PASS-GARBAGE, 3 CLEAN-ERROR, 1 JS-ERROR,
+// 3 WRONG.
 const BASELINE: Record<string, Status> = {
   A1: 'PASS',         // Stage 5: `/` consults the static type of the expression
   A2: 'PASS',
@@ -44,7 +46,7 @@ const BASELINE: Record<string, Status> = {
   B6: 'PASS',
   B7: 'PASS',
   B8: 'PASS',
-  B9: 'CLEAN-ERROR',  // string indexing / .length() unsupported — out of scope
+  B9: 'PASS',         // string indexing + .length() — string ops (was CLEAN-ERROR)
   B10: 'PASS',        // char arithmetic promotes to ASCII — Stage 4 (was WRONG)
   B11: 'PASS',        // Stage 5: 32-bit wraparound via CoerceToDeclared
   B12: 'PASS',
