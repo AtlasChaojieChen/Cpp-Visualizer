@@ -25,6 +25,16 @@ export interface StackFrameInfo {
   endLine: number;
   activeLine: number;
   activeCallColumns?: { startCol: number; endCol: number } | null;
+  // Present ONLY on the step where this frame executes its `return`, and only
+  // when it returns a value. Absent otherwise, so the key does not multiply
+  // across every frame of every step. See docs/return-values-design.md.
+  //
+  // `returnType` rides along because a bare value carries no type: the integer
+  // 104 and a pointer holding address 104 are indistinguishable, exactly as
+  // they are in `args` (which recovers the type from `variables[i]` — a return
+  // value has no such counterpart).
+  returnValue?: any;
+  returnType?: string;
 }
 
 export interface VariableInfo {
@@ -665,6 +675,10 @@ interface Frame {
   endLine: number;
   activeLine: number;
   activeCallColumns: { startCol: number; endCol: number } | null;
+  // Set immediately before the return step is recorded; the frame is popped
+  // right after, so it can never go stale and needs no clearing.
+  returnValue?: any;
+  returnType?: string;
 }
 
 interface HeapEntry {
@@ -1073,6 +1087,15 @@ class Interpreter {
       case 'While': this.executeWhile(stmt); break;
       case 'Return': {
         const val = stmt.value ? this.evalExpr(stmt.value) : undefined;
+        // Record the value on the frame BEFORE the step, so the frame and its
+        // return value coexist in one snapshot. Narrow it here with the same
+        // return type callFunction uses below: otherwise `char f()` would show
+        // 98 on a step where the caller actually receives 'b'.
+        if (val !== undefined) {
+          const rt = this.functions.get(this.currentFrame().name)?.returnType;
+          this.currentFrame().returnValue = rt ? this.CoerceToDeclared(rt, val) : val;
+          this.currentFrame().returnType = rt;
+        }
         this.recordStep(stmt.line);
         throw new ReturnSignal(val);
       }
@@ -1557,6 +1580,21 @@ class Interpreter {
         activeLine: frame.activeLine,
         activeCallColumns: frame.activeCallColumns ? { ...frame.activeCallColumns } : null,
         variables: Array.from(frame.vars.entries()).map(([name, v]) => this.snapVarEntry(name, v)),
+        // Conditional so the key exists only on a frame that is actively
+        // returning — at most one frame per step — instead of multiplying
+        // across every frame of all ~10,000 steps. A struct returned by value
+        // is copied, not aliased, like every other snapshotted value.
+        ...(frame.returnValue !== undefined
+          ? {
+              returnValue:
+                typeof frame.returnValue === 'object' && frame.returnValue !== null
+                  ? Array.isArray(frame.returnValue)
+                    ? [...frame.returnValue]
+                    : { ...frame.returnValue }
+                  : frame.returnValue,
+              ...(frame.returnType ? { returnType: frame.returnType } : {}),
+            }
+          : {}),
       })),
       globals: Array.from(this.globalVars.entries()).map(([name, v]) => this.snapVarEntry(name, v)),
       output: this.output,

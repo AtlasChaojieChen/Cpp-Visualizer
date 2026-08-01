@@ -31,6 +31,18 @@ const formatArg = (value: unknown, param?: VariableInfo): string => {
 };
 
 /**
+ * Formats a function's return value for the call-stack frame badge.
+ *
+ * Routed through the same `formatArg` as call arguments so a returned pointer
+ * prints hex like every other address, `nullptr` prints `nullptr`, a returned
+ * char prints `'b'`, and a struct returned by value prints its fields instead
+ * of `[object Object]`. `type` is the engine-recorded return type; without it
+ * the value alone cannot distinguish an int from an address.
+ */
+export const formatReturnValue = (value: unknown, type?: string): string =>
+  formatArg(value, { isPointer: !!type?.trimEnd().endsWith('*'), type: type ?? '' } as VariableInfo);
+
+/**
  * Renders a call-stack frame as `name(arg, arg, ...)`.
  *
  * Arguments are correlated with parameters positionally: `callFunction` inserts

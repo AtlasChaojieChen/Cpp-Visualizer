@@ -1,5 +1,5 @@
 import type { StackFrameInfo } from '@/lib/cpp-engine';
-import { formatFrameLabel } from '@/lib/format';
+import { formatFrameLabel, formatReturnValue } from '@/lib/format';
 
 interface Props {
   callStack: StackFrameInfo[];
@@ -49,6 +49,16 @@ export const CallStackView = ({ callStack, sourceLines, selectedFrameIndex, onSe
                 <span className="flex items-center gap-2">
                   {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-viz-green animate-pulse" />}
                   {formatFrameLabel(frame)}
+                  {/* Present only on the step where this frame executes its
+                      return — the moment a recursion's value starts climbing
+                      back up the stack. */}
+                  {'returnValue' in frame && (
+                    <span className="flex items-center gap-1 rounded bg-viz-orange/15 px-1.5 py-0.5 text-[10px] font-normal text-viz-orange ring-1 ring-viz-orange/30">
+                      <span aria-hidden="true">↩</span>
+                      <span className="sr-only">returns </span>
+                      {formatReturnValue(frame.returnValue, frame.returnType)}
+                    </span>
+                  )}
                 </span>
                 {frame.variables.length > 0 && (
                   <span className="text-[10px] text-muted-foreground font-normal">
