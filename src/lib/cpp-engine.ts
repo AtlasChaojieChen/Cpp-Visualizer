@@ -72,6 +72,16 @@ const KEYWORDS = new Set([
 
 const TYPE_KEYWORDS = new Set(['int', 'float', 'double', 'char', 'bool', 'void', 'string', 'const', 'vector']);
 
+// Stream-setup boilerplate that competitive-programming code opens with. It is
+// a no-op for an interpreter with no real iostreams, but `ios::sync_with_stdio`
+// uses `::`, which is outside the supported subset, so it used to stop the
+// parser on line one. Discarding the whole statement — trailing `;` or `,`
+// included — is the same treatment `#` lines and `using` already get. The
+// leading identifier is checked first so this only runs on a handful of tokens.
+const STREAM_SETUP_HEADS = new Set(['ios', 'ios_base', 'std', 'cin', 'cout', 'cerr']);
+const STREAM_SETUP_STMT =
+  /^(?:std\s*::\s*)?(?:(?:ios|ios_base)\s*::\s*sync_with_stdio|c(?:in|out|err)\s*\.\s*tie)\s*\([^)]*\)\s*[;,]?/;
+
 function tokenize(code: string): Token[] {
   const tokens: Token[] = [];
   let i = 0, line = 1, col = 1;
@@ -89,14 +99,29 @@ function tokenize(code: string): Token[] {
 
     if (/\d/.test(code[i])) {
       let num = ''; const startCol = col;
-      while (i < code.length && /[\d.]/.test(code[i])) { num += code[i++]; col++; }
+      // Hex and binary bases: bitwise code is written with masks like `0xff`,
+      // and without this `0xff` lexes as the number 0 followed by `xff`.
+      const base = code[i] === '0' ? code[i + 1] : '';
+      const digits = base === 'x' || base === 'X' ? /[0-9a-fA-F]/ : base === 'b' || base === 'B' ? /[01]/ : null;
+      if (digits) {
+        num = code.substring(i, i + 2); i += 2; col += 2;
+        while (i < code.length && digits.test(code[i])) { num += code[i++]; col++; }
+      } else {
+        while (i < code.length && /[\d.]/.test(code[i])) { num += code[i++]; col++; }
+      }
       tokens.push({ type: 'number', value: num, line, col: startCol }); continue;
     }
 
     if (/[a-zA-Z_]/.test(code[i])) {
-      let id = ''; const startCol = col;
+      let id = ''; const startCol = col, startIdx = i;
       while (i < code.length && /[a-zA-Z0-9_]/.test(code[i])) { id += code[i++]; col++; }
       if (id === 'using') { while (i < code.length && code[i] !== ';') { if (code[i] === '\n') { line++; col = 1; } else col++; i++; } i++; col++; continue; }
+      if (STREAM_SETUP_HEADS.has(id)) {
+        // Anchored at the identifier, so a `cout` in `cout << "cin.tie(0);"`
+        // cannot match — string literals are consumed before we ever get here.
+        const m = STREAM_SETUP_STMT.exec(code.substring(startIdx, startIdx + 120));
+        if (m) { i = startIdx + m[0].length; col = startCol + m[0].length; continue; }
+      }
       tokens.push({ type: KEYWORDS.has(id) ? 'keyword' : 'identifier', value: id, line, col: startCol }); continue;
     }
 
@@ -125,12 +150,18 @@ function tokenize(code: string): Token[] {
       tokens.push({ type: 'operator', value: '->', line, col }); i += 2; col += 2; continue;
     }
 
+    // Longest match first: `<<=` must not lex as `<<` followed by `=`.
+    const three = code.substring(i, i + 3);
+    if (three === '<<=' || three === '>>=') {
+      tokens.push({ type: 'operator', value: three, line, col }); i += 3; col += 3; continue;
+    }
+
     const two = code.substring(i, i + 2);
-    if (['==', '!=', '<=', '>=', '&&', '||', '++', '--', '+=', '-=', '*=', '/=', '%=', '<<', '>>'].includes(two)) {
+    if (['==', '!=', '<=', '>=', '&&', '||', '++', '--', '+=', '-=', '*=', '/=', '%=', '<<', '>>', '&=', '|=', '^='].includes(two)) {
       tokens.push({ type: 'operator', value: two, line, col }); i += 2; col += 2; continue;
     }
 
-    if ('+-*/%=<>!&'.includes(code[i])) {
+    if ('+-*/%=<>!&|^~'.includes(code[i])) {
       tokens.push({ type: 'operator', value: code[i], line, col }); i++; col++; continue;
     }
 
@@ -410,7 +441,7 @@ class Parser {
         this.advance();
         expressions.push({ type: 'StringLit', value: '\n', line });
       } else {
-        expressions.push(this.parseExpr());
+        expressions.push(this.parseAddition());
       }
     }
     this.expect('punctuation', ';');
@@ -422,7 +453,7 @@ class Parser {
     const targets: ASTNode[] = [];
     while (this.peek().type === 'operator' && this.peek().value === '>>') {
       this.advance();
-      targets.push(this.parseExpr());
+      targets.push(this.parseAddition());
     }
     this.expect('punctuation', ';');
     return { type: 'Cin', targets, line };
@@ -453,7 +484,7 @@ class Parser {
       this.advance();
       return { type: 'Assign', target: left, value: this.parseAssignment(), line: p.line };
     }
-    if (p.type === 'operator' && ['+=', '-=', '*=', '/=', '%='].includes(p.value)) {
+    if (p.type === 'operator' && ['+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '<<=', '>>='].includes(p.value)) {
       const op = this.advance().value;
       return { type: 'CompoundAssign', operator: op, target: left, value: this.parseAssignment(), line: p.line };
     }
@@ -470,10 +501,40 @@ class Parser {
   }
 
   private parseLogicalAnd(): ASTNode {
-    let left = this.parseEquality();
+    let left = this.parseBitOr();
     while (this.peek().type === 'operator' && this.peek().value === '&&') {
       const line = this.advance().line;
-      left = { type: 'Binary', operator: '&&', left, right: this.parseEquality(), line };
+      left = { type: 'Binary', operator: '&&', left, right: this.parseBitOr(), line };
+    }
+    return left;
+  }
+
+  // C++ slots the three bitwise levels between `&&` and `==`, loosest first:
+  // `|` then `^` then `&`. This is why `a & 1 == 0` means `a & (1 == 0)` and
+  // needs parentheses to do what it looks like it does.
+  private parseBitOr(): ASTNode {
+    let left = this.parseBitXor();
+    while (this.peek().type === 'operator' && this.peek().value === '|') {
+      const line = this.advance().line;
+      left = { type: 'Binary', operator: '|', left, right: this.parseBitXor(), line };
+    }
+    return left;
+  }
+
+  private parseBitXor(): ASTNode {
+    let left = this.parseBitAnd();
+    while (this.peek().type === 'operator' && this.peek().value === '^') {
+      const line = this.advance().line;
+      left = { type: 'Binary', operator: '^', left, right: this.parseBitAnd(), line };
+    }
+    return left;
+  }
+
+  private parseBitAnd(): ASTNode {
+    let left = this.parseEquality();
+    while (this.peek().type === 'operator' && this.peek().value === '&') {
+      const line = this.advance().line;
+      left = { type: 'Binary', operator: '&', left, right: this.parseEquality(), line };
     }
     return left;
   }
@@ -488,8 +549,22 @@ class Parser {
   }
 
   private parseComparison(): ASTNode {
-    let left = this.parseAddition();
+    let left = this.parseShift();
     while (this.peek().type === 'operator' && ['<', '>', '<=', '>='].includes(this.peek().value)) {
+      const op = this.advance();
+      left = { type: 'Binary', operator: op.value, left, right: this.parseShift(), line: op.line };
+    }
+    return left;
+  }
+
+  // Shifts sit between comparison and addition, which is exactly what keeps
+  // `cout << a << b` working: parseCout reads each operand at ADDITION
+  // precedence, so a `<<` between two operands is always the stream's, never a
+  // shift. `cout << (a << 2)` needs its parentheses here for the same reason it
+  // does in real C++.
+  private parseShift(): ASTNode {
+    let left = this.parseAddition();
+    while (this.peek().type === 'operator' && ['<<', '>>'].includes(this.peek().value)) {
       const op = this.advance();
       left = { type: 'Binary', operator: op.value, left, right: this.parseAddition(), line: op.line };
     }
@@ -519,6 +594,7 @@ class Parser {
     if (p.type === 'operator') {
       if (p.value === '!') { this.advance(); return { type: 'Unary', operator: '!', operand: this.parseUnary(), line: p.line }; }
       if (p.value === '-') { this.advance(); return { type: 'Unary', operator: '-', operand: this.parseUnary(), line: p.line }; }
+      if (p.value === '~') { this.advance(); return { type: 'Unary', operator: '~', operand: this.parseUnary(), line: p.line }; }
       if (p.value === '*') { this.advance(); return { type: 'Deref', operand: this.parseUnary(), line: p.line }; }
       if (p.value === '&') { this.advance(); return { type: 'AddressOf', operand: this.parseUnary(), line: p.line }; }
       if (p.value === '++') { this.advance(); return { type: 'PrefixInc', operand: this.parseUnary(), line: p.line }; }
@@ -640,6 +716,10 @@ const NUMERIC_TYPES = new Set(['int', 'short', 'long', 'float', 'double']);
 // `bool` promote to int in arithmetic, so they count.
 const INTEGRAL_TYPES = new Set(['int', 'short', 'long', 'char', 'bool']);
 const COMPARISON_OPS = new Set(['==', '!=', '<', '>', '<=', '>=', '&&', '||']);
+
+// Bitwise operators take integral operands and, after promotion, always yield
+// an `int` — even for `char & char`.
+const BITWISE_OPS = new Set(['&', '|', '^', '<<', '>>']);
 
 class ReturnSignal { constructor(public value: any) {} }
 class BreakSignal {}
@@ -889,9 +969,13 @@ class Interpreter {
       case 'BoolLit': return 'bool';
       case 'Binary': {
         if (COMPARISON_OPS.has(expr.operator)) return 'bool';
+        if (BITWISE_OPS.has(expr.operator)) return 'int';
         return this.ArithResultType(this.StaticTypeOf(expr.left), this.StaticTypeOf(expr.right));
       }
-      case 'Unary': return expr.operator === '!' ? 'bool' : this.StaticTypeOf(expr.operand);
+      case 'Unary':
+        if (expr.operator === '!') return 'bool';
+        if (expr.operator === '~') return 'int'; // integral promotion: ~c is an int
+        return this.StaticTypeOf(expr.operand);
       case 'Assign': return this.StaticTypeOf(expr.target);
       case 'CompoundAssign': return this.StaticTypeOf(expr.target);
       case 'Deref': {
@@ -919,6 +1003,39 @@ class Interpreter {
 
   private CharCode(v: any): number {
     return typeof v === 'string' ? v.charCodeAt(0) : v;
+  }
+
+  // ---- bitwise operands -----------------------------------------------------
+  //
+  // C++ requires integral operands here and applies integral promotion, so a
+  // char arrives as its code and a bool as 0/1. A floating operand is a compile
+  // error; values are untagged, so `4.0` is indistinguishable from `4` by value
+  // alone and the DECLARED type has to settle it — the same read-only walk `/`
+  // uses. Erroring rather than guessing is the point: this is a teaching tool.
+  private ToIntegral(op: string, e: ASTNode, v: any): number {
+    if (typeof v === 'boolean') return v ? 1 : 0;
+    if (typeof v === 'string' && v.length === 1) return v.charCodeAt(0);
+    const t = this.StaticTypeOf(e);
+    if (typeof v === 'number' && Number.isInteger(v) && t !== 'double' && t !== 'float') return v;
+    throw new Error(`Operator '${op}' requires integer operands at line ${e.line}`);
+  }
+
+  // JS masks a shift count to 5 bits, so `1 << 40` would quietly print 256.
+  // In C++ that is undefined behaviour on a 32-bit int, so name it instead.
+  private CheckShiftCount(op: string, n: number, line: number): number {
+    if (n < 0 || n >= 32) throw new Error(`Invalid shift count ${n} for '${op}' at line ${line}: must be 0..31`);
+    return n;
+  }
+
+  private ApplyBitwise(op: string, l: number, r: number, line: number): number {
+    switch (op) {
+      case '&': return l & r;
+      case '|': return l | r;
+      case '^': return l ^ r;
+      case '<<': return l << this.CheckShiftCount(op, r, line);
+      case '>>': return l >> this.CheckShiftCount(op, r, line);
+      default: throw new Error(`Unknown operator '${op}'`);
+    }
   }
 
   // `c++` / `--c` on a char steps the ASCII code and stays a char, so
@@ -1013,17 +1130,81 @@ class Interpreter {
   // model, so the honest teaching answer is to name the index and the bounds.
   // Silently returning JS `undefined` (reads) or growing the JS array (writes)
   // both taught a false model of what a fixed-size array is.
-  private checkIndex(arr: any[], idx: any, expr: ASTNode): number {
-    const label = expr.type === 'ArrayAccess' && expr.array.type === 'Identifier' ? `'${expr.array.name}'` : 'array';
+  // Also indexes a `string`, which is a JS string: `.length` and `[i]` read the
+  // same way, and a one-character string is already how this engine represents
+  // a char, so `s[i]` needs no conversion on the way out.
+  private checkIndex(arr: any[] | string, idx: any, expr: ASTNode): number {
+    const noun = typeof arr === 'string' ? 'String' : 'Array';
+    const label = expr.type === 'ArrayAccess' && expr.array.type === 'Identifier' ? `'${expr.array.name}'` : noun.toLowerCase();
     if (typeof idx !== 'number' || !Number.isInteger(idx))
-      throw new Error(`Array index must be an integer, got '${idx}' at line ${expr.line}`);
+      throw new Error(`${noun} index must be an integer, got '${idx}' at line ${expr.line}`);
     if (idx < 0 || idx >= arr.length)
       throw new Error(
-        `Array index out of bounds: ${label}[${idx}] — valid indices are ` +
+        `${noun} index out of bounds: ${label}[${idx}] — valid indices are ` +
         (arr.length === 0 ? 'none (size 0)' : `0..${arr.length - 1}`) +
         ` at line ${expr.line}`,
       );
     return idx;
+  }
+
+  // ---- iterators ------------------------------------------------------------
+  //
+  // `begin()`/`end()` return plain integer offsets, so `a.begin() + i` is
+  // ordinary arithmetic and no new value type reaches a snapshot. The cost is
+  // that `s.erase(s.begin() + 3)` and `s.erase(3)` both arrive as the number 3
+  // while meaning different things in C++ — erase ONE character, versus erase
+  // from index 3 to the end. The difference is recovered from the AST instead
+  // of the value: an argument whose expression tree contains a `begin()`/`end()`
+  // call is an iterator. Same read-only-walk trick `StaticTypeOf` uses for `/`.
+  private IsIteratorExpr(e: ASTNode | null | undefined): boolean {
+    if (!e) return false;
+    if (e.type === 'Call' && e.callee?.type === 'MemberAccess')
+      return e.callee.member === 'begin' || e.callee.member === 'end';
+    if (e.type === 'Binary') return this.IsIteratorExpr(e.left) || this.IsIteratorExpr(e.right);
+    return false;
+  }
+
+  private checkOffset(container: any[] | string, n: any, what: string, line: number): number {
+    if (typeof n !== 'number' || !Number.isInteger(n))
+      throw new Error(`erase() ${what} must be an integer, got '${n}' at line ${line}`);
+    if (n < 0 || n > container.length)
+      throw new Error(`erase() ${what} ${n} is out of range (size ${container.length}) at line ${line}`);
+    return n;
+  }
+
+  // The four overloads this covers, picked apart by IsIteratorExpr:
+  //   erase(it)        one element at it
+  //   erase(it, it2)   the half-open range [it, it2)
+  //   erase(pos)       string only: from pos to the end
+  //   erase(pos, len)  string only: len characters at pos
+  private EraseFrom(entry: VarEntry, container: any[] | string, expr: ASTNode, args: any[]): any {
+    const line = expr.line;
+    const iter = this.IsIteratorExpr(expr.args[0]);
+    let from: number, to: number;
+    if (iter) {
+      from = this.checkOffset(container, args[0], 'iterator', line);
+      to = args.length > 1 ? this.checkOffset(container, args[1], 'iterator', line) : from + 1;
+      // erase(it) on end() has nothing to remove; a range may legally be empty.
+      if (args.length === 1 && from >= container.length)
+        throw new Error(`erase() iterator ${from} is out of range (size ${container.length}) at line ${line}`);
+    } else {
+      if (Array.isArray(container))
+        throw new Error(`vector::erase() takes an iterator — use v.begin() + n — at line ${line}`);
+      from = this.checkOffset(container, args[0] ?? 0, 'position', line);
+      to = args.length > 1 ? from + this.checkOffset(container, args[1], 'count', line) : container.length;
+    }
+    if (to < from) throw new Error(`erase() range [${from}, ${to}) is inverted at line ${line}`);
+    to = Math.min(to, container.length);
+
+    if (typeof container === 'string') {
+      // Immutable in JS, so rebuild and write the whole value back.
+      this.writeEntry(entry, container.slice(0, from) + container.slice(to));
+      return from;
+    }
+    // A vector is mutated in place, which is what keeps a reference parameter
+    // and the caller's storage in agreement.
+    container.splice(from, to - from);
+    return from;
   }
 
   private declareVar(name: string, type: string, value: any, isPointer = false, isArray = false): void {
@@ -1301,6 +1482,13 @@ class Interpreter {
             return integral ? Math.trunc(l / r) : l / r;
           }
           case '%': return l % r;
+          case '&': case '|': case '^': case '<<': case '>>':
+            return this.ApplyBitwise(
+              expr.operator,
+              this.ToIntegral(expr.operator, expr.left, l),
+              this.ToIntegral(expr.operator, expr.right, r),
+              expr.line,
+            );
           case '==': return l === r;
           case '!=': return l !== r;
           case '<': return l < r;
@@ -1314,7 +1502,9 @@ class Interpreter {
       }
       case 'Unary': {
         const o = this.evalExpr(expr.operand);
-        return expr.operator === '!' ? !o : -o;
+        if (expr.operator === '!') return !o;
+        if (expr.operator === '~') return ~this.ToIntegral('~', expr.operand, o);
+        return -o;
       }
       case 'Assign': {
         const value = this.evalExpr(expr.value);
@@ -1332,6 +1522,16 @@ class Interpreter {
           // below truncates it when — and only when — the target is integral.
           case '/=': nv = cur / r; break;
           case '%=': nv = cur % r; break;
+          case '&=': case '|=': case '^=': case '<<=': case '>>=': {
+            const op = expr.operator.slice(0, -1);
+            nv = this.ApplyBitwise(
+              op,
+              this.ToIntegral(op, expr.target, cur),
+              this.ToIntegral(op, expr.value, r),
+              expr.line,
+            );
+            break;
+          }
           default: throw new Error(`Unknown operator '${expr.operator}'`);
         }
         // The compound result lands in the target, so it narrows to the target's
@@ -1347,14 +1547,17 @@ class Interpreter {
       case 'PrefixDec': { const v = this.StepValue(expr.operand, this.evalLValue(expr.operand), -1); this.assignTo(expr.operand, v); return v; }
       case 'ArrayAccess': {
         const arr = this.evalExpr(expr.array), idx = this.evalExpr(expr.index);
-        // Track array access for visualization
-        if (expr.array.type === 'Identifier' && typeof idx === 'number') {
+        // Track array access for visualization. Strings are excluded: the
+        // ArrayVisualizer renders element cells, and a string is one value.
+        if (Array.isArray(arr) && expr.array.type === 'Identifier' && typeof idx === 'number') {
           // Try to find the label from the index expression (e.g. a[l] → label "l")
           const label = expr.index.type === 'Identifier' ? expr.index.name : String(idx);
           this.currentArrayAccesses.push({ arrayName: expr.array.name, index: idx, label });
         }
         if (Array.isArray(arr)) return arr[this.checkIndex(arr, idx, expr)];
-        throw new Error('Not an array');
+        // `s[i]` yields a one-character string, which IS this engine's char.
+        if (typeof arr === 'string') return arr[this.checkIndex(arr, idx, expr)];
+        throw new Error(`Not an array or string at line ${expr.line}`);
       }
       case 'Call': {
         // Handle member function calls (e.g., v.push_back(x), v.size())
@@ -1375,26 +1578,42 @@ class Interpreter {
             if (!Array.isArray(obj.value)) throw new Error(`${expr.callee.object.name} is not a vector`);
             return obj.value.pop();
           }
-          if (method === 'size') {
-            if (Array.isArray(obj.value)) return obj.value.length;
-            if (typeof obj.value === 'string') return obj.value.length;
-            throw new Error(`${expr.callee.object.name} has no size()`);
+          const sized = Array.isArray(obj.value) || typeof obj.value === 'string';
+          if (method === 'size' || method === 'length') {
+            if (sized) return obj.value.length;
+            throw new Error(`${expr.callee.object.name} has no ${method}()`);
           }
           if (method === 'empty') {
-            if (Array.isArray(obj.value)) return obj.value.length === 0;
+            if (sized) return obj.value.length === 0;
             throw new Error(`${expr.callee.object.name} has no empty()`);
           }
+          // An iterator is a plain integer offset — see EraseFrom. This is what
+          // makes `a.begin() + i` work with no new value type and therefore no
+          // change to the snapshot format.
+          if (method === 'begin') {
+            if (sized) return 0;
+            throw new Error(`${expr.callee.object.name} has no begin()`);
+          }
+          if (method === 'end') {
+            if (sized) return obj.value.length;
+            throw new Error(`${expr.callee.object.name} has no end()`);
+          }
           if (method === 'front') {
-            if (Array.isArray(obj.value)) return obj.value[0];
+            if (sized) return obj.value[0];
             throw new Error(`${expr.callee.object.name} has no front()`);
           }
           if (method === 'back') {
-            if (Array.isArray(obj.value)) return obj.value[obj.value.length - 1];
+            if (sized) return obj.value[obj.value.length - 1];
             throw new Error(`${expr.callee.object.name} has no back()`);
           }
           if (method === 'clear') {
             if (Array.isArray(obj.value)) { obj.value.length = 0; return undefined; }
+            if (typeof obj.value === 'string') { this.writeEntry(entry, ''); return undefined; }
             throw new Error(`${expr.callee.object.name} has no clear()`);
+          }
+          if (method === 'erase') {
+            if (!sized) throw new Error(`${expr.callee.object.name} has no erase()`);
+            return this.EraseFrom(entry, obj.value, expr, args);
           }
           throw new Error(`Unknown method '${method}'`);
         }
@@ -1495,7 +1714,7 @@ class Interpreter {
     }
     if (expr.type === 'ArrayAccess') {
       const arr = this.evalExpr(expr.array), idx = this.evalExpr(expr.index);
-      if (!Array.isArray(arr)) throw new Error('Not an array');
+      if (!Array.isArray(arr) && typeof arr !== 'string') throw new Error(`Not an array or string at line ${expr.line}`);
       return arr[this.checkIndex(arr, idx, expr)];
     }
     if (expr.type === 'Deref') return this.evalExpr(expr);
@@ -1510,7 +1729,16 @@ class Interpreter {
       const v = this.lookupVar(target.array.name);
       if (!v) throw new Error(`Undefined array '${target.array.name}'`);
       const arr = this.readEntry(v);
-      if (!Array.isArray(arr)) throw new Error(`'${target.array.name}' is not an array at line ${target.line}`);
+      // A JS string is immutable, so `s[i] = c` rebuilds it and writes the whole
+      // value back through the entry — which also keeps a reference parameter
+      // pointing at the caller's storage working.
+      if (typeof arr === 'string') {
+        const i = this.checkIndex(arr, this.evalExpr(target.index), target);
+        const ch = typeof value === 'string' ? value[0] : String.fromCharCode(value);
+        this.writeEntry(v, arr.slice(0, i) + ch + arr.slice(i + 1));
+        return;
+      }
+      if (!Array.isArray(arr)) throw new Error(`'${target.array.name}' is not an array or string at line ${target.line}`);
       arr[this.checkIndex(arr, this.evalExpr(target.index), target)] = this.CoerceToDeclared(this.ElementType(v.type), value);
       return;
     }
