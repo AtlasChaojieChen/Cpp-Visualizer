@@ -15,6 +15,9 @@ dist-ssr
 # Generated bundle for the standalone test harness
 tests/engine.mjs
 
+# Playwright MCP scratch output (snapshots, console logs)
+.playwright-mcp/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
