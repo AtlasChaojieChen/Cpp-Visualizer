@@ -60,8 +60,9 @@ logical change, so parallel agents cannot commit each other's work.
 
 - [x] `docs/type-tracking-design.md` — division/doubles (needs static types)
 - [x] `docs/return-values-design.md` — return values are recorded nowhere
-- [ ] **Implementation of both is NOT started and needs your approval** — the
-      docs end with a recommendation and stop, as the plan requires.
+- [x] **Approved and implemented.** Stage 5 in three commits (overflow, `/=`,
+      `/`); Stage 6 in one. Both docs updated with an implemented-status header,
+      and Stage 6's records the one deviation (`returnType` rides along).
 
 ## Corrections to project docs (found during execution)
 
@@ -80,30 +81,39 @@ logical change, so parallel agents cannot commit each other's work.
 
 ## Review
 
-**All implementation stages are complete. Ladder: 29/38 → 33/38.**
+**Every stage in `PLAN.md` is complete. Ladder: 29/38 → 35/38, WRONG 3 → 0.**
 
 | Check | Result |
 |---|---|
-| Harness | 33/38 (baseline 29) |
+| Harness | 35/38 (baseline 29) |
 | `tsc --noEmit` | clean |
-| vitest | 83 passed, 0 failed (4 files) |
+| vitest | 140 passed, 0 failed (6 files) |
 
-Remaining 5 non-passing, all deliberate and out of scope per `PLAN.md`:
+The severity breakdown matters more than the total:
 
-- `A1` WRONG — `7.0 / 2` → 3. Stage 5, design doc written, not implemented.
-- `B11` WRONG — no 32-bit wrap. Folded into the Stage 5 design.
-- `B3`, `B9`, `B13` CLEAN-ERROR — array params, string indexing, 2D arrays.
-  Genuinely unsupported features, each a parser + interpreter project.
+| | before | after |
+|---|---|---|
+| PASS | 29 | 35 |
+| WRONG (silent wrong answer) | 3 | **0** |
+| JS-ERROR (raw JS leaked) | 1 | **0** |
+| PASS-GARBAGE | 1 | 0 |
+| CLEAN-ERROR | 4 | 3 |
 
-Zero `JS-ERROR` and zero `PASS-GARBAGE` results: every failure is either a clean
-C++-level message or a documented design gap.
+The three remaining failures are `B3`, `B9`, `B13` — array parameters, string
+indexing/`.length()`, 2D arrays. Genuinely unsupported features, each a parser +
+interpreter project, explicitly out of scope in `PLAN.md`. All three fail with a
+clean C++-level error, so nothing lies to the user.
 
 ### What is left
 
-1. **Approve or reject Stages 5 and 6.** Both design docs are written and end at
-   a recommendation. Stage 5 would take the ladder to 35/38 and remove the last
-   two `WRONG` results.
-2. **Absolute og:url / og:image** once the production domain is known.
-3. `CLAUDE.md`'s "Known bugs" section is now substantially out of date — most of
-   what it lists is fixed. Worth a pass so it stops describing repaired bugs as
-   current.
+1. **Absolute `og:url` / `og:image`** once the production domain is known. This
+   is the only item that needs information I do not have.
+2. Out-of-scope items from `PLAN.md`, unchanged and still deliberate:
+   responsive breakpoints, raising `maxSteps`, and the three unsupported
+   features above.
+
+`CLAUDE.md` was rewritten: its "Known bugs" section described mostly-repaired
+bugs as current. It now records what is actually true, plus a short list of
+corrections so the fixed ones do not get re-added. Its verification rule now
+names `node_modules/.bin/tsc` explicitly, since bare `npx tsc` exits 0 without
+checking anything.

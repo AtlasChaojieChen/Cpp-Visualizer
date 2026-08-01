@@ -8,7 +8,7 @@ the browser tab. Deployed on Vercel as a static site.
 
 ## Architecture
 
-- `src/lib/cpp-engine.ts` (~1250 lines) is the entire engine:
+- `src/lib/cpp-engine.ts` (~1650 lines) is the entire engine:
   tokenizer -> recursive-descent parser -> tree-walking interpreter.
   **Do not split this file without asking me first.**
 - `executeCode(code, stdin)` is the only public entry point. Returns
@@ -22,13 +22,24 @@ the browser tab. Deployed on Vercel as a static site.
 - Memory addresses are fake: `nextAddr` starts at 100, `allocAddr()` adds 4.
 - `delete` sets `freed = true` rather than removing the heap entry, which is how
   use-after-free gets reported.
-- `maxSteps = 10000` is the only guard against infinite loops. There is currently
-  no call-depth guard (see Known bugs).
+- `maxSteps = 10000` guards infinite loops; `maxCallDepth` guards runaway
+  recursion. Both throw C++-level messages.
+- Values are plain JS values — a char is a one-character string, a number is a JS
+  number. The engine does NOT tag values with their C++ type. Where it needs a
+  type it reads the DECLARED one off the AST (`StaticTypeOf` / `DeclaredTypeOf`)
+  and narrows at write boundaries (`CoerceToDeclared`). Keeping values untagged
+  is what keeps the snapshot format renderable; see `docs/type-tracking-design.md`
+  before changing it.
 
 ## File map
 
 - `src/lib/cpp-engine.ts` — the whole interpreter
-- `src/lib/example-programs.ts` — the 20 built-in examples
+- `src/lib/example-programs.ts` — the built-in examples, surfaced by the picker
+  in the header. Two carry a `stdin` field, which the picker loads too.
+- `src/lib/format.ts` — shared value/address formatting. Anything that prints a
+  pointer, an argument or a return value goes through here so panels agree.
+- `docs/` — design docs for the two changes that needed one before code
+  (`type-tracking-design.md`, `return-values-design.md`).
 - `src/pages/Index.tsx` — top-level state, playback timer, layout
 - `src/components/visualizer/` — the panels (CodeEditor, CallStackView,
   VariableInspector, HeapView, ArrayVisualizer, TreeVisualizer, OutputPanel,
@@ -50,46 +61,44 @@ array parameters (`int a[]`), string indexing and `.length()`.
 
 `#` lines are discarded by the tokenizer. Includes are never processed.
 
-## Known bugs — do not "discover" and silently fix these
+## Known limitations — do not "discover" and silently fix these
 
-Verified July 2026. If a task touches one of these, say so; don't fix it as a
-side effect of something else.
+Verified 31 July 2026, after the `PLAN.md` stages. If a task touches one of
+these, say so; don't fix it as a side effect of something else.
 
-**Engine (`cpp-engine.ts`):**
-- Line 962: `/` truncates doubles. `7.0/2.0` gives 3. The tokenizer parses `7.0`
-  into the JS number 7, so `Number.isInteger` can't distinguish it from `7`.
-  **A correct fix requires tracking static types through expression evaluation,
-  which the interpreter does not currently do.** This is a design change, not a
-  one-liner. Line 991 (`/=`) truncates unconditionally, which is worse.
-- Char arithmetic does string concatenation: `'a' + 1` gives `"a1"`, should be 98.
-  Chars are stored as JS strings.
-- No 32-bit int overflow. `INT_MAX + 1` gives 2147483648, real C++ wraps negative.
-- Out-of-bounds array read returns the JS string `"undefined"`.
-- Unbounded recursion surfaces the raw JS error `Maximum call stack size exceeded`
-  and the recorded step count is nondeterministic. Needs a call-depth cap that
-  throws a C++-level message.
-- `maxSteps = 10000` caps recursion demos at about fib(16).
+The ladder (`tests/run.mjs`) sits at **35/38**, with **zero WRONG** results —
+every remaining failure is a clean C++-level error on a genuinely unsupported
+feature, not a silent wrong answer.
 
-**UI:**
-- `HeapView.tsx:40` — `String(block.value)` renders every struct as the literal
-  `[object Object]`. Worst bug on the site. Also no arrow is drawn between a
-  pointer and its target.
-- `ArrayVisualizer.tsx:63` — renders `{val}` directly. **React silently drops
-  boolean children**, so `bool` arrays show as empty cells.
-- `TreeVisualizer.tsx:105` — hardcoded `fill="hsl(226, 64%, 88%)"` makes the tree
-  invisible in light mode.
-- `Index.tsx:36` — `const [speed] = useState(500)`; the setter was never
-  destructured, so playback is locked at ~2 steps/sec with no control.
-- `CallStackView.tsx:12` — prints pointer args in decimal while every other panel
-  uses hex; `nullptr` prints as `0`.
-- Playback buttons have no `aria-label`, `title`, or text. The scrubber is a
-  custom div, so it has no keyboard support.
-- No responsive breakpoints; the 3-column layout is kept at all widths.
+**Unsupported features (parser + interpreter work, not bugs):**
+- Array parameters `int a[]` (B3).
+- String indexing and `.length()` (B9).
+- 2D arrays (B13).
+- Everything in the NOT-supported list above.
 
-**Data model gap:** function return values are not recorded anywhere.
-`StackFrameInfo` has no field for them, so frames pop silently and recursion's
-most important moment is invisible. Adding this requires an engine change, a type
-change, and a UI change together.
+**Real limitations:**
+- `maxSteps = 10000` caps recursion demos at about fib(16). Raising it trades
+  directly against memory, since every step is a full snapshot.
+- No responsive breakpoints; the 3-column layout is kept at all widths. Real,
+  but a layout project rather than a bug fix.
+- Out-of-bounds array access throws rather than modelling adjacent memory. That
+  is deliberate for a teaching tool — see the comment on `checkIndex`.
+
+**Corrections to earlier versions of this file** — these were listed as bugs and
+were either fixed or never true. Don't re-add them:
+- `/` truncating doubles, `/=` truncating unconditionally, and missing 32-bit
+  int overflow: fixed in Stage 5.
+- Char arithmetic (`'a' + 1`), out-of-bounds reads returning `"undefined"`, and
+  unbounded recursion leaking a raw JS error: fixed in Stage 4.
+- `HeapView` rendering structs as `[object Object]`, boolean array cells
+  rendering empty, the tree being invisible in light mode, playback locked at
+  one speed, pointer args printing in decimal, and missing `aria-label`s on the
+  transport buttons: fixed in Stages 1 and 2.
+- Function return values not being recorded: fixed in Stage 6.
+- "The scrubber is a custom div, so it has no keyboard support" was **wrong**.
+  It is a shadcn/Radix `<Slider>` and has always been keyboard-accessible.
+- The decimal-pointer bug was described as living only in `CallStackView`. An
+  identical helper existed in `VariableInspector`; both now share `format.ts`.
 
 ## What works well — don't regress these
 
@@ -97,7 +106,14 @@ change, and a UI change together.
 - 5922 steps (fib 15) generate in ~160ms; scrubbing is instant at any size.
 - The heap `FREED` state after `delete` is clear and correct.
 - The infinite-loop message (`Execution limit exceeded`) is exactly right.
-- BST rendering grows correctly as nodes are inserted (in dark mode).
+- BST rendering grows correctly as nodes are inserted, in both themes.
+- Reference parameters alias the caller's storage, including array elements and
+  struct fields, without changing the snapshot model.
+- The return-value badge on a call-stack frame: it exists only on the step where
+  that frame returns, so it adds no steps. Keep it that way.
+- `src/test/ladder.test.ts` pins all 38 programs BY ID and is severity-aware, so
+  a swap (break one, fix another) cannot hide behind an unchanged total. When a
+  change legitimately improves a program, update its BASELINE in the same commit.
 
 ## Environment gotchas
 
@@ -112,7 +128,13 @@ change, and a UI change together.
 
 - Every engine change needs a test in `src/test/` that fails before and passes after.
 - Never edit `src/components/ui/`.
-- Run `npx tsc --noEmit` and `npx vitest run` before saying you're done.
+- Before saying you're done, run all four:
+  `npx esbuild src/lib/cpp-engine.ts --bundle --format=esm --outfile=tests/engine.mjs`,
+  `node tests/run.mjs`, `./node_modules/.bin/tsc --noEmit`,
+  `./node_modules/.bin/vitest run`.
+  Use the `node_modules/.bin/` paths. **Never `npx tsc`** — with `node_modules`
+  missing, npx downloads an unrelated abandoned package called `tsc`, prints a
+  banner and exits 0, which reads as a clean typecheck while checking nothing.
 - Show me the diff before moving to the next task. One commit per logical change.
 - If a task turns out to need a change to the snapshot-recording model, or to how
   types flow through `evalExpr`, stop and explain before writing code.

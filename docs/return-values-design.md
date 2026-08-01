@@ -1,6 +1,14 @@
 # Recording function return values
 
-**Status: design only. Nothing here is implemented. Do not implement without approval.**
+**Status: APPROVED AND IMPLEMENTED (31 July 2026), as Option 1.** Step counts
+are unchanged, which was the deciding constraint.
+
+**One deviation from this design:** the frame also records `returnType`. This
+doc assumed the shared formatter could work from the value alone, but a bare
+value carries no type — the integer 104 and a pointer to address 104 are
+indistinguishable. `args` recovers this from `variables[i]`; a return value has
+no such counterpart, so the type is recorded alongside it under the same
+conditional spread.
 
 Covers Stage 6 of `PLAN.md`.
 

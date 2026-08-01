@@ -1,6 +1,9 @@
 # Type tracking: division, doubles, and integer overflow
 
-**Status: design only. Nothing here is implemented. Do not implement without approval.**
+**Status: APPROVED AND IMPLEMENTED (31 July 2026), as Approach B in three
+commits — overflow, then `/=`, then `/`.** Ladder 33 → 35/38; A1 and B11 both
+`WRONG → PASS`, leaving zero WRONG results. Kept as the record of why the value
+representation was left alone. Read it before changing how types are decided.
 
 Covers Stage 5 of `PLAN.md`, and folds in 32-bit integer overflow (B11) as
 `PLAN.md` asks, because it wants the same machinery.
