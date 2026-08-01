@@ -12,21 +12,22 @@ the browser tab. Deployed on Vercel as a static site.
 
 ## Commands
 
-Package manager is **npm** (a `bun.lock` also exists — ignore it).
+Package manager is **npm**. `bun.lock` was deleted and is gitignored — a second
+lockfile lets `bun install` resolve a different tree than `package-lock.json`.
 
 ```sh
 npm install
-npm run dev        # vite dev server
+npm run dev        # vite dev server (port 8080)
 npm run build      # production build
 npm run lint       # eslint — SEE BELOW, currently red
 ```
 
-`npm run lint` does not pass and never has (42 errors on `main` before this
-branch's work). Almost all of it is `@typescript-eslint/no-explicit-any` inside
-`cpp-engine.ts`, which is inherent to the untagged-value design described under
-Architecture — "fixing" it by adding types would contradict that design. **Lint
-is not part of the verification gate.** Don't treat a red lint as something you
-broke, and don't do a typing sweep to clear it unless asked.
+`npm run lint` does not pass and never has: **61 errors, 49 of them in
+`cpp-engine.ts`**, almost all `@typescript-eslint/no-explicit-any`. That is
+inherent to the untagged-value design described under Architecture — "fixing" it
+by adding types would contradict that design. **Lint is not part of the
+verification gate.** Don't treat a red lint as something you broke, and don't do
+a typing sweep to clear it unless asked.
 
 **Verification — run all four before claiming done.** They are ordered; step 1
 regenerates the bundle step 2 reads.
@@ -182,6 +183,13 @@ were either fixed or never true. Don't re-add them:
   `src/**/*.{test,spec}.{ts,tsx}` is collected, so `tests/` is harness-only.
 - Themes come from `next-themes` as a `dark` class on `<html>`. Anything with a
   hardcoded colour must be checked in BOTH themes — that has broken twice.
+- `.gitattributes` pins text to LF in the repo. Development happens on Windows
+  with `core.autocrlf=true`, so without it every commit warned about line
+  endings. Don't "fix" a CRLF warning by rewriting files.
+- `tasks/` and `.claude/` are gitignored local workflow, not source.
+  `.claude/agents/verifier.md` defines a subagent that runs the four
+  verification commands and reports a pass/fail delta; it is machine-local, so
+  don't assume it exists.
 
 ## Rules
 
