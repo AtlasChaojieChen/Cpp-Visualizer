@@ -18,6 +18,16 @@ tests/engine.mjs
 # Playwright MCP scratch output (snapshots, console logs)
 .playwright-mcp/
 
+# Local working notes and agent config — personal workflow, not project source.
+# .claude/agents/verifier.md defines the verification subagent; keep a copy if
+# you rely on it, but it is machine-local by choice.
+tasks/
+.claude/
+
+# npm is the package manager for this project (see CLAUDE.md). A stray bun.lock
+# lets `bun install` resolve a different tree than package-lock.json.
+bun.lock
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

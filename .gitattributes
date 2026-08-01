@@ -1,0 +1,19 @@
+# Normalize line endings. This repo is developed on Windows with
+# core.autocrlf=true, which made every commit warn "LF will be replaced by
+# CRLF". Text is stored as LF in the repository and checked out native.
+* text=auto
+
+# Explicit for the files most likely to be touched by tooling.
+*.ts    text eol=lf
+*.tsx   text eol=lf
+*.js    text eol=lf
+*.mjs   text eol=lf
+*.json  text eol=lf
+*.css   text eol=lf
+*.html  text eol=lf
+*.md    text eol=lf
+
+# Binary — never diffed, never line-ending converted.
+*.png   binary
+*.ico   binary
+*.svg   text eol=lf

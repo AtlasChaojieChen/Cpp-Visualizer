@@ -90,8 +90,10 @@ call `executeCode` on it from a vitest test instead.
   in the header. Two carry a `stdin` field, which the picker loads too.
 - `src/lib/format.ts` — shared value/address formatting. Anything that prints a
   pointer, an argument or a return value goes through here so panels agree.
-- `docs/` — design docs for the two changes that needed one before code
-  (`type-tracking-design.md`, `return-values-design.md`).
+- `docs/` — `PLAN.md` is the completed bug-fix plan these stages followed, and
+  the record of what the original bug list got wrong. The two design docs
+  (`type-tracking-design.md`, `return-values-design.md`) cover the changes that
+  needed a design before code, and both end with the approach that was taken.
 - `src/pages/Index.tsx` — top-level state, playback timer, layout
 - `src/components/visualizer/` — the panels (CodeEditor, CallStackView,
   VariableInspector, HeapView, ArrayVisualizer, TreeVisualizer, OutputPanel,
@@ -117,7 +119,7 @@ array parameters (`int a[]`), string indexing and `.length()`.
 
 ## Known limitations — do not "discover" and silently fix these
 
-Verified 31 July 2026, after the `PLAN.md` stages. If a task touches one of
+Verified 31 July 2026, after the `docs/PLAN.md` stages. If a task touches one of
 these, say so; don't fix it as a side effect of something else.
 
 The ladder (`tests/run.mjs`) sits at **35/38**, with **zero WRONG** results —
