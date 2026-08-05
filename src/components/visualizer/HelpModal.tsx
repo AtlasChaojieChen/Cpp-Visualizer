@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { HelpCircle, CheckCircle2, XCircle, Lightbulb } from 'lucide-react';
+import { HelpCircle, CheckCircle2, XCircle, Lightbulb, Github } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { REPO_URL } from '@/lib/repo';
 import {
   Dialog,
   DialogContent,
@@ -10,25 +11,34 @@ import {
 } from '@/components/ui/dialog';
 
 const SUPPORTED = [
-  'Step-by-step execution with line highlighting',
-  'Call stack visualization',
-  'Variable inspection (scalars, pointers, structs)',
-  'Global variables and global arrays',
+  'Step-by-step execution with line highlighting — forwards and backwards',
+  'Call stack with arguments and return values',
+  'Variable inspection (scalars, pointers, references, structs)',
+  'Globals, global arrays, and 1D local arrays',
   'Recursion',
-  '1D arrays (local and global)',
-  'Pointers and heap memory (new / delete)',
-  'Struct field input and display',
-  'cin input for plain variables, array elements, struct fields, and dereferenced pointers',
+  'Pointers and heap memory (new / delete), including use-after-free detection',
+  'Reference parameters that alias the caller’s storage',
+  'string: indexing that reads and writes, plus size / length / empty / front / back / clear / erase',
+  'vector<T>: push_back / pop_back, indexing, and the same size / empty / front / back / clear / erase set',
+  'Bitwise operators & | ^ ~ << >> with their compound forms, and hex (0xff) / binary (0b1010) literals',
+  'cin / cout / endl, including cin into array elements, struct fields, and dereferenced pointers',
 ];
 
 const LIMITATIONS = [
-  '2D arrays not yet supported',
-  'Brace initialization of a stack variable (Node a{1, nullptr};) not yet supported — but new Node{1, nullptr} on the heap does work',
-  'Advanced C++ / STL features (maps, sets, templates, …) are out of scope',
-  'Some complex global initializer expressions may fall back to 0',
+  '2D arrays and array parameters (int a[]) are not supported',
+  'Brace initialization of a stack variable (Node a{1, nullptr};) is not supported — but new Node{1, nullptr} on the heap does work',
+  'Structs are data only: no methods, templates, inheritance, or operator overloading',
+  'No STL beyond string and vector — no map, set, sort, or <algorithm>',
+  'No range-based for, auto, switch, do-while, or the ternary ?: operator',
+  'An iterator is just an integer offset, so a.begin() + i works but *it and it++ do not',
+  'substr / find / insert / push_back on a string are not implemented',
+  'A global initialized from a function call falls back to 0',
+  'Execution stops after 10,000 steps, which caps recursion demos at roughly fib(16)',
+  'bool does not decay to 0/1 — cout << (a == b) prints true, not 1',
 ];
 
 const TIPS = [
+  'Everything runs in your browser — there is no compiler and no server',
   'Use small, focused examples for the clearest visualization',
   'Prefer straightforward C++ syntax when exploring features',
   'If execution fails, the syntax may be unsupported rather than a bug in your code',
@@ -116,6 +126,18 @@ export const HelpModal = () => {
               ))}
             </ul>
           </section>
+
+          <div className="border-t border-border" />
+
+          <a
+            href={REPO_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <Github className="w-3.5 h-3.5 shrink-0" />
+            Source, issues and the full supported-subset notes on GitHub
+          </a>
         </div>
       </DialogContent>
     </Dialog>

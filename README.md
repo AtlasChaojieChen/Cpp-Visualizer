@@ -27,13 +27,25 @@ use-after-free is detected and shown.
 
 `int`, `float`, `double`, `char`, `bool`, `void`, `string`, `vector`, `struct`
 (data only), `if`/`else`, `for`, `while`, `return`/`break`/`continue`,
-`new`/`delete`, `cout`/`cin`/`endl`, pointers, `nullptr`, reference parameters.
+`new`/`delete`, `cout`/`cin`/`endl`, pointers, `nullptr`, reference parameters,
+bitwise operators, string indexing and methods.
+
+Bitwise `& | ^ ~ << >>` and `&= |= ^= <<= >>=` at full C++ precedence, plus hex
+(`0xff`) and binary (`0b1010`) literals. Operands must be integral.
+
+String and vector methods: `size` `length` `empty` `front` `back` `clear`
+`begin` `end` `erase`, plus `push_back`/`pop_back` on vectors. `s[i]` both
+reads and writes. An iterator is modelled as a plain integer offset, so
+`a.begin() + i` is ordinary arithmetic — but `*it` and `it++` are not modelled.
 
 Not supported: classes with methods, templates, inheritance, operator
 overloading, `map`/`set`/`sort`/`<algorithm>`, range-based `for`, `auto`,
-multiple files, 2D arrays, array parameters (`int a[]`), string indexing and
-`.length()`. `#` lines are discarded by the tokenizer; includes are never
-processed.
+`switch`, `do`/`while`, the ternary `?:`, multiple files, 2D arrays, array
+parameters (`int a[]`), brace initialization of a stack variable
+(`Node a{1, nullptr};` — the heap form `new Node{1, nullptr}` does work), and
+`substr`/`find`/`insert`/`push_back` on strings. `#` lines are discarded by the
+tokenizer; includes are never processed, and stream-setup statements such as
+`ios::sync_with_stdio(...)` and `cin.tie(...)` are discarded as no-ops.
 
 Unsupported input fails with a deliberate C++-level message rather than
 pretending to run.
