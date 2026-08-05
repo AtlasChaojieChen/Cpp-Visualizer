@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Github } from 'lucide-react';
 import logo from '@/assets/logo.png';
 
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
@@ -11,6 +12,8 @@ import { executeCode, type ExecutionStep } from '@/lib/cpp-engine';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { HelpModal } from '@/components/visualizer/HelpModal';
 import { ExamplePicker } from '@/components/visualizer/ExamplePicker';
+import { REPO_URL } from '@/lib/repo';
+import { Button } from '@/components/ui/button';
 import type { ExampleProgram } from '@/lib/example-programs';
 
 
@@ -94,6 +97,22 @@ int main() {
         </div>
         <div className="flex items-center gap-2">
           <span className="hidden lg:inline text-xs text-muted-foreground">Step-by-step execution visualizer</span>
+          <Button
+            asChild
+            size="icon"
+            variant="ghost"
+            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+          >
+            <a
+              href={REPO_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="View source on GitHub"
+              title="View source on GitHub"
+            >
+              <Github className="w-4 h-4" />
+            </a>
+          </Button>
           <ThemeToggle />
         </div>
       </header>
